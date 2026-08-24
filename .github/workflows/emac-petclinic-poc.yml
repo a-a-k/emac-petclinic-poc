@@ -63,7 +63,7 @@ jobs:
             -f experiment/docker/petclinic.Dockerfile \
             -t emac-petclinic-build:ci .
           docker run --rm emac-petclinic-build:ci \
-            ./mvnw --batch-mode -pl spring-petclinic-api-gateway dependency:tree \
+            mvn --batch-mode -pl spring-petclinic-api-gateway dependency:tree \
             > "$ARTIFACT_ROOT/inputs/gateway-dependency-tree.txt"
 
       - name: Execute pilot and confirmatory protocol
@@ -96,4 +96,3 @@ jobs:
           if-no-files-found: error
           retention-days: 90
           compression-level: 1
-

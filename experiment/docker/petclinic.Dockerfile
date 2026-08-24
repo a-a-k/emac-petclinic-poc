@@ -4,7 +4,7 @@ ARG JAVA_IMAGE
 FROM ${MAVEN_IMAGE} AS build
 WORKDIR /source
 COPY vendor/application-signals-demo/ ./
-RUN ./mvnw --batch-mode -DskipTests -Dcheckstyle.skip=true package
+RUN mvn --batch-mode -DskipTests -Dcheckstyle.skip=true package
 
 FROM alpine:3.20.3@sha256:1e42bbe2508154c9126d48c2b8a75420c3544343bf86fd041fb7527e017a4b4a AS agent
 ARG OTEL_AGENT_VERSION=2.11.0
