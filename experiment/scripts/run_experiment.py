@@ -11,6 +11,7 @@ import random
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -49,6 +50,16 @@ HEALTH_ENDPOINTS = {
     "fault-proxy": f"{FAULT_CONTROL}/status",
     "jaeger": f"{JAEGER}/api/services",
 }
+
+
+def progress(event: str, **fields: object) -> None:
+    suffix = " ".join(f"{key}={value}" for key, value in fields.items())
+    print(f"EMAC_PROGRESS event={event}{' ' + suffix if suffix else ''}", flush=True)
+
+
+def heartbeat(stop: threading.Event) -> None:
+    while not stop.wait(30):
+        progress("heartbeat", utc=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
 
 
 def read_json(path: Path) -> dict[str, object]:
@@ -224,6 +235,7 @@ def run_window(
     rate: float,
     inspect_semantics: bool,
 ) -> dict[str, object]:
+    progress("window-start", run_id=run_id, requests=requests, rate=rate)
     request_json(f"{ROUTER_CONTROL}/reset", method="POST")
     start_us = time.time_ns() // 1_000
     start_mono = time.monotonic()
@@ -236,6 +248,8 @@ def run_window(
             if delay > 0:
                 time.sleep(delay)
             futures.append(executor.submit(one_request, run_id, inspect_semantics))
+            if (ordinal + 1) % 1000 == 0:
+                progress("window-scheduled", run_id=run_id, requests=ordinal + 1)
         for future in as_completed(futures):
             rows.append(future.result())
     end_us = time.time_ns() // 1_000
@@ -268,6 +282,7 @@ def run_window(
             for row in sorted(rows, key=lambda item: int(item.get("ordinal") or 10**12)):
                 handle.write(json.dumps(row, sort_keys=True) + "\n")
     write_json(destination, summary)
+    progress("window-frozen", run_id=run_id, completed=len(rows))
     return summary
 
 
@@ -291,6 +306,7 @@ def visits_functional_check() -> dict[str, object]:
 
 
 def prepare_condition(condition_dir: Path, condition: str, run_id: str, protocol: dict[str, object]) -> dict[str, object]:
+    progress("condition-prepare", condition=condition, run_id=run_id)
     compose("restart", "jaeger")
     wait_http("jaeger", HEALTH_ENDPOINTS["jaeger"], 120)
     compose("restart", "otel-collector")
@@ -328,6 +344,7 @@ def prepare_condition(condition_dir: Path, condition: str, run_id: str, protocol
         "visitsAfterFaultDisabled": visits_check,
     }
     write_json(condition_dir / "ground-truth" / "manipulation.json", result)
+    progress("preconditioning-frozen", condition=condition, run_id=run_id, final_state=state)
     return result
 
 
@@ -431,11 +448,13 @@ def run_condition(
         evidence_dir,
         limit=20000,
     )
+    progress("trace-evidence-frozen", condition=condition, run_id=run_id)
 
     freeze_path = condition_dir / "model" / "evidence-freeze.json"
     run_emac(evidence_dir, freeze_path)
     freeze_mtime_ns = freeze_path.stat().st_mtime_ns
     freeze = read_json(freeze_path)
+    progress("emac-model-frozen", condition=condition, run_id=run_id)
 
     outcome_started_ns = time.time_ns()
     outcome = run_window(
@@ -478,6 +497,12 @@ def run_condition(
         "localAvailabilitySlis": freeze["localAvailabilitySlis"],
     }
     write_json(condition_dir / "result.json", result)
+    progress(
+        "condition-complete",
+        condition=condition,
+        run_id=run_id,
+        valid=validity["valid"],
+    )
     return result
 
 
@@ -512,6 +537,7 @@ def run_pair(
     pair_dir = root / phase / f"pair-{ordinal:02d}"
     order = ["control", "treatment"]
     random.Random(seed).shuffle(order)
+    progress("pair-start", pair_id=pair_id, order=",".join(order))
     write_json(pair_dir / "schedule.json", {"pairId": pair_id, "seed": seed, "conditionOrder": order})
     results: dict[str, dict[str, object]] = {}
     for condition in order:
@@ -530,6 +556,7 @@ def run_pair(
         "conditions": results,
     }
     write_json(pair_dir / "pair-result.json", pair_result)
+    progress("pair-complete", pair_id=pair_id, valid=valid)
     return pair_result
 
 
@@ -629,40 +656,56 @@ def main() -> None:
     parser.add_argument("--stack-already-up", action="store_true")
     args = parser.parse_args()
 
+    heartbeat_stop = threading.Event()
+    heartbeat_thread = threading.Thread(target=heartbeat, args=(heartbeat_stop,), daemon=True)
+    heartbeat_thread.start()
+
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=False)
     protocol = read_json(PROTOCOL_PATH)
-    if not args.stack_already_up:
-        compose("up", "--build", "-d")
-    wait_stack()
-    verify_runtime_isolation(output)
-    capture_environment(output)
+    try:
+        if not args.stack_already_up:
+            progress("stack-up-start")
+            compose("up", "--build", "-d")
+        wait_stack()
+        progress("stack-ready")
+        verify_runtime_isolation(output)
+        progress("runtime-isolation-verified")
+        capture_environment(output)
 
-    all_pairs: list[dict[str, object]] = []
-    for ordinal in range(1, args.pilot_pairs + 1):
-        pair = run_pair(output, "pilot", ordinal, args.seed + ordinal, protocol)
-        all_pairs.append(pair)
+        all_pairs: list[dict[str, object]] = []
+        for ordinal in range(1, args.pilot_pairs + 1):
+            pair = run_pair(output, "pilot", ordinal, args.seed + ordinal, protocol)
+            all_pairs.append(pair)
 
-    confirmatory: list[dict[str, object]] = []
-    ordinal = 0
-    invalid = 0
-    while len([pair for pair in confirmatory if pair["valid"]]) < args.confirmatory_pairs:
-        ordinal += 1
-        if ordinal > args.confirmatory_pairs + args.max_replacement_pairs:
-            break
-        pair = run_pair(output, "confirmatory", ordinal, args.seed + 10_000 + ordinal, protocol)
-        confirmatory.append(pair)
-        all_pairs.append(pair)
-        if not pair["valid"]:
-            invalid += 1
+        confirmatory: list[dict[str, object]] = []
+        ordinal = 0
+        invalid = 0
+        while len([pair for pair in confirmatory if pair["valid"]]) < args.confirmatory_pairs:
+            ordinal += 1
+            if ordinal > args.confirmatory_pairs + args.max_replacement_pairs:
+                break
+            pair = run_pair(output, "confirmatory", ordinal, args.seed + 10_000 + ordinal, protocol)
+            confirmatory.append(pair)
+            all_pairs.append(pair)
+            if not pair["valid"]:
+                invalid += 1
 
-    report = summarize(confirmatory, all_pairs)
-    report["requestedConfirmatoryPairs"] = args.confirmatory_pairs
-    report["replacementPairsUsed"] = invalid
-    write_json(output / "report.json", report)
-    write_markdown(output / "report.md", report)
-    if report["confirmatoryPairsRetained"] < args.confirmatory_pairs:
-        raise SystemExit("confirmatory run did not produce the predeclared number of valid pairs")
+        report = summarize(confirmatory, all_pairs)
+        report["requestedConfirmatoryPairs"] = args.confirmatory_pairs
+        report["replacementPairsUsed"] = invalid
+        write_json(output / "report.json", report)
+        write_markdown(output / "report.md", report)
+        progress(
+            "protocol-complete",
+            valid_confirmatory=report["confirmatoryPairsRetained"],
+            requested=args.confirmatory_pairs,
+        )
+        if report["confirmatoryPairsRetained"] < args.confirmatory_pairs:
+            raise SystemExit("confirmatory run did not produce the predeclared number of valid pairs")
+    finally:
+        heartbeat_stop.set()
+        heartbeat_thread.join(timeout=2)
 
 
 if __name__ == "__main__":

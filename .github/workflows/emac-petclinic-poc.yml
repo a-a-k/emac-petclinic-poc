@@ -17,6 +17,7 @@ jobs:
     timeout-minutes: 330
     env:
       ARTIFACT_ROOT: artifacts/github-${{ github.run_id }}-${{ github.run_attempt }}
+      PYTHONUNBUFFERED: "1"
     steps:
       - name: Check out EmaC artifact
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
