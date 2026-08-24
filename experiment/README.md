@@ -97,6 +97,11 @@ The configuration explicitly pins CircuitBreaker and TimeLimiter properties and
 disables the Spring Cloud Resilience4j Bulkhead wrapper. The 15-minute open-state
 budget is checked against each condition duration.
 
+The AWS fork constructs DynamoDB, SQS, and Kinesis clients during application
+startup. A digest-pinned LocalStack container supplies those APIs inside the
+ephemeral Compose network using fixed dummy credentials and the SDK's standard
+endpoint override. No request leaves the GitHub runner for an AWS data-plane API.
+
 ## Reproducibility bundle
 
 The uploaded `emac-petclinic-poc-*` artifact contains:
@@ -127,4 +132,3 @@ statistical-significance language for this PoC.
 - All container manifest digests: `images.lock.env`
 - Circuit-breaker/fallback declaration: `journey-model.json`
 - Replication and validity policy: `protocol.json`
-

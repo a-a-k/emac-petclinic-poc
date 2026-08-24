@@ -37,6 +37,7 @@ PROM_ENDPOINTS = {
     "visits": "http://localhost:18084/actuator/prometheus",
 }
 HEALTH_ENDPOINTS = {
+    "localstack": "http://localhost:14566/_localstack/health",
     "config": "http://localhost:18888/actuator/health",
     "discovery": "http://localhost:18761/actuator/health",
     "customers": "http://localhost:18083/actuator/health",
@@ -89,7 +90,7 @@ def wait_http(name: str, url: str, deadline_seconds: int = 300) -> None:
         try:
             status, _headers, body = request(url, timeout=3)
             if status // 100 == 2:
-                if name not in {"router", "fault-proxy", "jaeger"}:
+                if name not in {"localstack", "router", "fault-proxy", "jaeger"}:
                     payload = json.loads(body)
                     if str(payload.get("status", "")).upper() != "UP":
                         raise RuntimeError(f"health status is {payload}")
