@@ -1,5 +1,6 @@
 # syntax=docker/dockerfile:1.7
 ARG MAVEN_IMAGE
+ARG JAVA_IMAGE
 FROM ${MAVEN_IMAGE} AS build
 WORKDIR /source
 COPY vendor/application-signals-demo/ ./
@@ -12,7 +13,6 @@ RUN wget -q -O /opentelemetry-javaagent.jar \
       "https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases/download/v${OTEL_AGENT_VERSION}/opentelemetry-javaagent.jar" \
     && echo "${OTEL_AGENT_SHA256}  /opentelemetry-javaagent.jar" | sha256sum -c -
 
-ARG JAVA_IMAGE
 FROM ${JAVA_IMAGE}
 ARG MODULE
 RUN apt-get update \
