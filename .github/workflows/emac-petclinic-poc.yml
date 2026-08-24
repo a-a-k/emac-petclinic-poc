@@ -1,7 +1,13 @@
-name: EmaC PetClinic mechanism-feasibility PoC
+name: EmaC PetClinic runtime-model discovery PoC
 
 on:
   workflow_dispatch:
+    inputs:
+      run_confirmatory:
+        description: Run the 20-pair matrix after a valid pilot
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -15,7 +21,7 @@ jobs:
   image-build:
     name: Build and freeze the shared image set
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 360
     env:
       COMPOSE_ENV: experiment/ci-images.env
       BUILD_ARTIFACT: artifacts/build-inputs
@@ -34,7 +40,7 @@ jobs:
           test "$(git -C vendor/application-signals-demo rev-parse HEAD)" = "$source_commit"
           test -z "$(git -C vendor/application-signals-demo status --porcelain)"
 
-      - name: Validate adapters and fixed declarations
+      - name: Validate discovery adapters, transformations, and declarations
         run: python3 -m unittest discover -s experiment/tests -v
 
       - name: Resolve commit-pinned image coordinates
@@ -114,6 +120,7 @@ jobs:
   confirmatory:
     name: Confirmatory pair ${{ matrix.pair }}
     needs: pilot
+    if: ${{ inputs.run_confirmatory && needs.pilot.result == 'success' }}
     strategy:
       fail-fast: false
       max-parallel: 20
@@ -131,9 +138,10 @@ jobs:
 
   assess-primary:
     name: Plan bounded replacements
-    if: always() && needs.pilot.result == 'success'
+    if: always() && inputs.run_confirmatory && needs.pilot.result == 'success'
     needs: [pilot, confirmatory]
     runs-on: ubuntu-24.04
+    timeout-minutes: 360
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
       valid_primary: ${{ steps.plan.outputs.valid_primary }}
@@ -177,10 +185,10 @@ jobs:
 
   aggregate:
     name: Aggregate 20 retained paired blocks
-    if: always() && needs.pilot.result == 'success'
+    if: always() && inputs.run_confirmatory && needs.pilot.result == 'success'
     needs: [image-build, pilot, confirmatory, assess-primary, replacement]
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 360
     steps:
       - name: Check out aggregation code
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683

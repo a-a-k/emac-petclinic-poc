@@ -1,20 +1,25 @@
-# EmaC PetClinic mechanism-feasibility artifact
+# EmaC PetClinic runtime-model discovery artifact
 
-This repository contains a GitHub Actions-only mechanism-feasibility experiment
-for EmaC on the AWS Application Signals fork of Spring PetClinic.
+This repository contains a GitHub Actions-only feasibility experiment for EmaC
+on the AWS Application Signals fork of Spring PetClinic.
 
-The normative execution is [.github/workflows/emac-petclinic-poc.yml](.github/workflows/emac-petclinic-poc.yml).
-It builds one immutable image set, executes one pilot pair, then executes twenty
-confirmatory control/treatment pairs concurrently on isolated GitHub-hosted
-runners. An aggregation job publishes the report; each paired block publishes
-its own reproducibility artifact. No CloudWatch account or local experiment run
-is required.
+The normative execution is
+[`.github/workflows/emac-petclinic-poc.yml`](.github/workflows/emac-petclinic-poc.yml).
+By default a dispatch runs one pilot pair only. The confirmatory input explicitly
+enables twenty isolated pair-level jobs after a valid pilot; it is never launched
+implicitly by a pilot-only dispatch.
 
-The experiment is deliberately narrow: one predeclared Resilience4j
-`getOwnerDetails` circuit-breaker/fallback operator. Metrics identify its
-instance-scoped runtime state and decision counts; traces corroborate suppression
-of the declared Gateway-to-Visits edge. EmaC freezes its delta and estimate before
-the held-out oracle sends any outcome request.
+The artifact evaluates a narrow discovery mechanism for one supported operator
+class. EmaC bootstraps service instances, runtime operators, and executed service
+edges from metrics and traces. After hidden circuit-breaker preconditioning, it
+discovers the instance-scoped state delta, binds rejected calls to the uniquely
+suppressed edge, applies the delta to the bootstrap model, and compiles two
+journey-specific estimates before any held-out semantic outcome is sent.
 
-See [experiment/README.md](experiment/README.md) for the executable protocol,
-artifact layout, validity policy, and exact claim boundary.
+The upstream application source remains unpatched. The runtime deployment adds
+experimental configuration, an OpenTelemetry agent, a Spring initializer for
+unrelated eager AWS demo beans, deterministic routing and fault injection, and
+the discovery/evaluation pipeline.
+
+See [`experiment/README.md`](experiment/README.md) for the executable protocol,
+artifact boundaries, validity policy, and exact claim.

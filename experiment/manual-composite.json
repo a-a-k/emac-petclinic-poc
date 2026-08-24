@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "emac.manual-composite/v1",
+  "operatorName": "getOwnerDetails",
+  "primaryEdge": {
+    "sourceService": "api-gateway",
+    "targetService": "visits-service"
+  },
+  "fallback": "emptyVisitsForPets"
+}

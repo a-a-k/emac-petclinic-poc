@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "emac.journey-contract/v2",
+  "contractId": "petclinic-owner-details",
+  "entrypoint": {
+    "serviceName": "api-gateway",
+    "operationContains": [
+      "/api/gateway/owners/"
+    ]
+  },
+  "journeys": {
+    "owner-history": {
+      "target": 0.995,
+      "suppressedInteractionSatisfies": false
+    },
+    "owner-only": {
+      "target": 0.995,
+      "suppressedInteractionSatisfies": true
+    }
+  },
+  "scope": [
+    "The contract declares user intent, not the service topology.",
+    "Whether a suppressed interaction satisfies a journey is requirements knowledge and is not inferred from telemetry."
+  ]
+}

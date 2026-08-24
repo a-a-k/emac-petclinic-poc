@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deterministic 99:1 router for the two byte-identical API gateways."""
+"""Deterministic 99:1 router with a runtime-selected minority gateway."""
 
 from __future__ import annotations
 
@@ -19,7 +19,10 @@ GATEWAYS = {
 }
 DATA_PORT = int(os.environ.get("DATA_PORT", "8080"))
 CONTROL_PORT = int(os.environ.get("CONTROL_PORT", "8475"))
-B_EVERY = int(os.environ.get("B_EVERY", "100"))
+MINORITY_GATEWAY = os.environ.get("MINORITY_GATEWAY", "B").upper()
+MINORITY_EVERY = int(os.environ.get("MINORITY_EVERY", "100"))
+if MINORITY_GATEWAY not in GATEWAYS:
+    raise ValueError(f"MINORITY_GATEWAY must be one of {sorted(GATEWAYS)}")
 JOURNAL_PATH = Path(os.environ.get("JOURNAL_PATH", "/artifacts/router-journal.jsonl"))
 HOP_HEADERS = {
     "connection",
@@ -50,7 +53,10 @@ class RouteState:
             if forced in GATEWAYS:
                 selected = forced
             else:
-                selected = "B" if self.ordinal % B_EVERY == 0 else "A"
+                minority = self.ordinal % MINORITY_EVERY == 0
+                selected = MINORITY_GATEWAY if minority else next(
+                    gateway for gateway in GATEWAYS if gateway != MINORITY_GATEWAY
+                )
             if selected == "A":
                 self.a += 1
             else:
@@ -161,7 +167,13 @@ class ControlHandler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
-    journal({"event": "router-start", "b_every": B_EVERY})
+    journal(
+        {
+            "event": "router-start",
+            "minority_gateway": MINORITY_GATEWAY,
+            "minority_every": MINORITY_EVERY,
+        }
+    )
     control = ThreadingHTTPServer(("0.0.0.0", CONTROL_PORT), ControlHandler)
     threading.Thread(target=control.serve_forever, daemon=True).start()
     ThreadingHTTPServer(("0.0.0.0", DATA_PORT), DataHandler).serve_forever()
@@ -169,4 +181,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

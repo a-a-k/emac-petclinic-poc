@@ -1,6 +1,6 @@
 {
-  "schemaVersion": "emac.poc-protocol/v1",
-  "claimClass": "mechanism-feasibility",
+  "schemaVersion": "emac.discovery-protocol/v2",
+  "claimClass": "operator-edge-model-discovery-feasibility",
   "upstreamCommit": "a6619308ef610c0002ce03eedbaf6672a4fc5cae",
   "runtimeIsolation": {
     "mode": "neutralize unused eager AWS demo components after component scanning",
@@ -16,10 +16,24 @@
     "conditionOrder": "seeded random permutation within each pair",
     "invalidReplacementPolicy": "After all 20 primary pairs finish, run at most two replacement pairs for missing or invalid pairs; retain every attempt in artifacts; never filter individual condition-runs."
   },
+  "identity": {
+    "policy": "Generate opaque gateway instance identifiers and randomly choose the 1% minority slot for every pair.",
+    "hiddenFromDiscovery": [
+      "logical Compose slot",
+      "minority slot",
+      "faulted instance"
+    ]
+  },
   "routing": {
-    "gatewayA": 0.99,
-    "gatewayB": 0.01,
-    "deterministicRule": "Every 100th unforced request is routed to gateway-B."
+    "majority": 0.99,
+    "minority": 0.01,
+    "deterministicRule": "Every 100th unforced request is routed to the seeded minority gateway."
+  },
+  "bootstrap": {
+    "requests": 200,
+    "ratePerSecond": 25,
+    "routing": "balanced forced requests across both opaque gateway instances",
+    "responseBodiesVisibleToDiscovery": false
   },
   "preconditioning": {
     "requests": 120,
@@ -31,27 +45,44 @@
     "expectedControlFinalState": "CLOSED"
   },
   "measurement": {
-    "evidenceRequests": 10000,
-    "outcomeRequests": 10000,
-    "ratePerSecond": 100,
+    "pilot": {
+      "evidenceRequests": 2000,
+      "outcomeRequests": 2000,
+      "ratePerSecond": 25
+    },
+    "confirmatory": {
+      "evidenceRequests": 10000,
+      "outcomeRequests": 10000,
+      "ratePerSecond": 50
+    },
+    "loadWorkers": 64,
+    "maxInFlight": 128,
+    "requestTimeoutSeconds": 8,
     "traceSampling": 1.0,
+    "traceQueryLimitPadding": 100,
+    "traceQueryTimeoutSeconds": 300,
     "drainSeconds": 3,
     "collectorFlushSeconds": 5,
-    "breakerOpenBudgetSeconds": 900,
-    "localAvailabilityTolerancePercentagePoints": 0.1
+    "breakerOpenBudgetSeconds": 21600,
+    "localAvailabilityTolerancePercentagePoints": 0.1,
+    "minimumTraceCoverage": 0.99,
+    "operatorEdgeBindingToleranceFraction": 0.01
   },
   "validity": {
     "required": [
-      "Both gateway processes restarted before each condition.",
-      "Config Server returns HTTP 2xx and every dependent Spring service reports actuator status UP.",
-      "No non-experiment traffic occurs between boundary snapshots.",
+      "Both gateway processes restart before bootstrap discovery in each condition.",
+      "Bootstrap model v0 is frozen before hidden preconditioning.",
+      "Both gateways restart again after bootstrap so discovery traffic cannot seed the breaker sliding window.",
       "The treatment breaker is OPEN and the control breaker is CLOSED after preconditioning.",
       "Visits is healthy after the preconditioning fault is disabled.",
       "The condition completes before waitDurationInOpenState elapses.",
-      "TimeLimiter timeout count is zero in evidence and outcome windows.",
-      "Router allocation is exactly 9900/100 in each 10000-request window.",
-      "Boundary values use direct actuator snapshots and exact counter subtraction.",
-      "Every application process emits an EMAC_AWS_DEMO_NEUTRALIZER startup record with the expected replacement count."
+      "Opaque instance identifiers are recovered from telemetry rather than logical Compose slots.",
+      "The treatment operator-to-edge binding is unique within the predeclared tolerance.",
+      "The effective model is produced only by applying the typed delta to model v0.",
+      "The compiler reads only the effective model and journey contract.",
+      "The model and estimate freeze predates all held-out outcome requests.",
+      "No non-experiment traffic occurs between boundary snapshots.",
+      "Boundary values use direct actuator snapshots and exact counter subtraction."
     ]
   }
 }

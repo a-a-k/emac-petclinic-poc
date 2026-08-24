@@ -1,0 +1,6 @@
+{
+  "schemaVersion": "emac.held-out-oracle/v1",
+  "requestPath": "/api/gateway/owners/6",
+  "ownerId": 6,
+  "expectedVisitId": 1
+}

@@ -1,142 +1,145 @@
-# PetClinic stateful-control-flow PoC
+# PetClinic runtime-model discovery PoC
 
 ## Fixed claim
 
-> For one predeclared Resilience4j circuit-breaker/fallback operator, EmaC maps
-> instance-scoped runtime state and execution evidence to a versioned
-> operator-state delta and a journey-specific reliability estimate, which is
-> evaluated against a held-out semantic outcome under balanced
-> measurement-window local availability SLIs.
+> For a pre-supported Resilience4j circuit-breaker operator class, EmaC
+> discovers an instance-scoped effective interaction model from runtime metrics
+> and traces, binds operator activation to a uniquely suppressed service edge,
+> applies a typed model delta, and compiles journey-specific reliability
+> estimates without observing journey outcomes.
 
-This is a mechanism-feasibility PoC. It is not evidence for arbitrary structural
-discovery, dependence drift, certification soundness, or operational utility.
+The PoC does not claim arbitrary architecture discovery, discovery of user
+intent, adaptation, certification, or support for operator classes other than
+the declared generic Resilience4j adapter.
 
-## Where it runs
+## Declared versus discovered
 
-The complete experiment runs in GitHub Actions through
-`EmaC PetClinic mechanism-feasibility PoC` (`workflow_dispatch`). The workflow
-has no abbreviated local execution branch. Its fixed invocation is:
+The EmaC input contract declares only the journey entrypoint, target, and whether
+a suppressed interaction satisfies each journey. The generic adapter catalog
+declares Resilience4j metric syntax and circuit-breaker semantics.
 
-```text
-1 pilot pair
-20 valid confirmatory pairs in a pair-level GitHub Actions matrix
-control/treatment order randomized within each pair
-10,000 evidence requests per condition at 100 requests/s
-10,000 held-out outcome requests per condition at 100 requests/s
-```
+The following application facts are not EmaC inputs:
 
-An invalid pair is retained and replaced as a whole, up to the predeclared limit
-of two replacement pairs. The workflow fails if it cannot obtain twenty valid
-confirmatory pairs. Invalid attempts remain in the uploaded artifacts. A single
-build job publishes commit-tagged application images to GHCR; the pilot and all
-matrix jobs pull that exact image set. Conditions within a pair remain
-sequential on one runner, while independent paired blocks run in parallel.
+- gateway instance identifiers or logical Compose slots;
+- the minority/faulted replica;
+- the application operator name;
+- the downstream service graph;
+- the affected edge;
+- the initial or current operator state;
+- routing weights, fault schedule, response semantics, or oracle result.
 
-## Isolation of evidence and ground truth
+The manual dynamic-composite baseline intentionally receives the hand-maintained
+operator/edge/fallback mapping. It is not used by the discovery pipeline.
 
-Each condition has this enforced sequence:
+## Executable sequence
 
-```text
-restart gateways and reset breaker state
-  -> precondition gateway-B
-  -> disable fault and verify Visits
-  -> direct counter snapshot E0
-  -> evidence traffic
-  -> direct counter snapshot E1 and trace freeze
-  -> evidence-only EmaC evaluation
-  -> evidence-freeze.json created
-  -> held-out outcome traffic and semantic oracle
-```
-
-`emac_evaluate.py` accepts only the declared model and the evidence directory.
-That directory contains exact actuator counter snapshots, a status-only load
-summary, and normalized/raw traces. It contains no fault schedule, response body,
-or oracle result. The runner records and checks that the model freeze predates the
-first outcome request.
-
-The independent oracle requires owner `6` and visit `1` for `owner-history`.
-For the semantic control `owner-only`, the same empty-visits fallback satisfies
-the journey. Thus the same observed `q` lowers the history estimate but leaves
-the owner-only estimate at `A_P`.
-
-## Runtime algebra
-
-The evidence adapter computes exact boundary-counter deltas:
+Every condition runs in this order:
 
 ```text
-N_permitted = successful + failed + ignored permitted calls
-N_decision = N_permitted + not-permitted calls
-A_P = N_decision / N_eligible
-q = N_permitted / N_decision
-A_V = successful permitted calls / N_permitted
-R_J = A_P [q A_V + (1 - q A_V) A_F]
+restart telemetry and both gateways
+  -> balanced, evidence-only bootstrap traffic
+  -> discover and freeze interaction-model v0
+  -> restart both gateways to discard bootstrap breaker history
+  -> hidden control/treatment preconditioning
+  -> disable the fault and verify Visits directly
+  -> evidence counter snapshot E0
+  -> evidence traffic with response bodies discarded
+  -> counter snapshot E1 and generic trace-graph extraction
+  -> discover typed operator-state/edge-binding delta
+  -> apply delta to v0, producing effective-model v1
+  -> compile journey estimates only from v1 + journey contract
+  -> freeze model/estimate versions
+  -> send new held-out requests and evaluate response semantics
 ```
 
-`A_F=0` for `owner-history`; `A_F=1` for `owner-only`. The adapter also verifies
-the arithmetic identity `A_P q A_V = successful-permitted / eligible`.
+The compiler cannot read metrics or traces. It accepts only
+`effective-model.json` and `journey-contract.json`. The effective model records
+its parent model and applied delta versions; the compiled estimate records the
+effective model version.
 
-The typed delta contains only the observed runtime-state change:
+## Discovery rule
+
+The bootstrap trace graph identifies normally executed outgoing edges per opaque
+gateway instance. The runtime adapter enumerates operator names and states from
+standard metric labels. For an instance with rejected calls, EmaC considers
+bootstrap edges that previously executed on at least 95% of its journey traces.
+It binds the operator only if exactly one edge satisfies:
 
 ```text
-path: operator[getOwnerDetails].runtimeState[gateway-B]
-before: CLOSED
-after: OPEN
+missing runtime edge executions ~= not-permitted calls
 ```
 
-The affected declared edge and activated declared fallback are stored as derived
-impacts, not presented as discovered structure.
+within the predeclared one-percent tolerance. Ambiguous or absent bindings make
+the treatment invalid; EmaC does not select the most convenient candidate.
 
-## Manipulation
+## Reliability compilation
 
-Both gateway images are built from the same unchanged upstream commit. The
-router sends every 100th request to gateway-B. For treatment preconditioning,
-the Visits proxy returns a fast `503` to sequential gateway-B requests. With the
-pinned count-based configuration, the nominal record is 100 failed permitted
-calls followed by 20 not-permitted calls and final state `OPEN`. Control sends
-120 successful requests and remains `CLOSED`. The proxy is disabled and the real
-Visits response is checked before measurement starts.
+The applied model contains:
 
-The configuration explicitly pins CircuitBreaker and TimeLimiter properties and
-disables the Spring Cloud Resilience4j Bulkhead wrapper. The 15-minute open-state
-budget is checked against each condition duration.
+```text
+A_P = operator decisions / eligible requests
+q   = permitted decisions / all operator decisions
+A_V = successful permitted decisions / permitted decisions
+```
 
-The AWS fork eagerly constructs DynamoDB, SQS, Kinesis, S3, and Bedrock demo
-components even though none participates in the declared journey. Its pinned
-AWS SDK predates the standard endpoint-override environment variables. An
-experiment-only Spring initializer therefore replaces exactly the upstream
-PetClinic components in `.aws.` packages with constructor-free inert instances
-after component scanning. The full standard PetClinic service stack and the
-owner-history code path remain unchanged. Every replacement is emitted as an
-`EMAC_AWS_DEMO_NEUTRALIZED` startup record, and no AWS data-plane API is called.
+For a journey with suppressed-branch semantic value `A_S`:
 
-## Reproducibility artifacts
+```text
+R_J = A_P [q A_V + (1 - q A_V) A_S]
+```
 
-The workflow publishes one build-provenance artifact, one artifact per pilot or
-confirmatory paired block, and one aggregate report. Together they contain:
+`owner-history` declares `A_S=0`; `owner-only` declares `A_S=1`. The held-out
+oracle separately checks owner `6` and visit `1` after the estimate has frozen.
 
-- resolved Compose configuration, upstream locks, image locks, dependency tree,
-  and container inspection records;
-- raw direct Prometheus snapshots at every boundary;
-- compressed raw Jaeger traces and normalized instance/edge execution rows;
-- the versioned, pre-outcome EmaC model freeze and provenance partition;
-- hidden manipulation records and fault/router journals;
-- compressed per-request semantic oracle records and outcome summaries;
-- every condition and pair validity record, including invalid attempts;
-- the aggregate JSON/Markdown report and complete Compose logs.
+## Randomization and anti-hardcoding
 
-The manuscript should report all forty valid confirmatory condition-runs, raw
-counts, median/range summaries, exact delta recovery, false control deltas, held-
-out absolute errors, target-side errors, and local-SLI balance. It should not use
-statistical-significance language for this PoC.
+Each pair generates two opaque instance identifiers and randomly selects which
+logical gateway is the deterministic one-percent minority. The treatment opens
+the breaker on that minority replica; EmaC receives neither mapping. Unit tests
+reject the fixture instance names, operator name, and affected downstream name
+if they occur in discovery, model-application, compiler, or trace-normalization
+source files.
 
-## Pinned inputs
+## GitHub execution and durability
 
-- AWS Application Signals demo commit:
-  `a6619308ef610c0002ce03eedbaf6672a4fc5cae`
-- Experiment Config Server reference snapshot:
-  `323993ce2519c6d02df63e08bf4458d123d3b611`
-- OTel Java agent: `2.11.0`, SHA-256
-  `4cff4ab46179260a61fc0d884f3f170cfbd9d2962dd260be2cff31262d0c7618`
-- All container manifest digests: `images.lock.env`
-- Circuit-breaker/fallback declaration: `journey-model.json`
-- Replication and validity policy: `protocol.json`
+The reusable pair job has GitHub's 360-minute maximum. The experiment step has a
+300-minute ceiling, reserving one hour for `always()` log capture, teardown, and
+artifact upload. Incremental checkpoints and per-window summaries survive a
+step timeout.
+
+A pilot uses 200 balanced bootstrap requests plus 2,000 evidence and 2,000
+outcome requests per condition at 25 requests/s. A confirmatory pair uses the
+same bootstrap and 10,000 evidence/outcome requests per condition at 50
+requests/s. Load submission is bounded to 128 in-flight requests, and reports
+achieved throughput and latency percentiles rather than only scheduled rate.
+
+The default workflow dispatch runs only the pilot. Twenty confirmatory pairs are
+enabled by an explicit boolean dispatch input and start only after that dispatch's
+pilot succeeds. Invalid confirmatory pairs are retained and replaced as whole
+pairs, up to two replacements.
+
+## Evidence and artifacts
+
+Each condition publishes:
+
+- direct boundary metric snapshots with opaque identity tags;
+- raw compressed Jaeger response and generic normalized edge graph;
+- status-only evidence load summary without logical routing identity;
+- bootstrap model, typed delta, effective model, and compiled estimate;
+- the hand-maintained dynamic-composite baseline;
+- hidden runtime assignment, manipulation and routing records;
+- held-out per-request semantic decisions and outcome summary;
+- version-chain, discovery, trace coverage, local-SLI, and timing checks.
+
+The complete artifact also includes resolved Compose configuration, pinned source
+and image inputs, dependency tree, container inspection, checkpoints, and logs.
+
+## Upstream boundary
+
+The workflow checks out pinned commit
+`a6619308ef610c0002ce03eedbaf6672a4fc5cae` and verifies a clean upstream worktree
+before building. Business source and the existing owner-history fallback remain
+unpatched. The deployment does add external configuration, an OpenTelemetry Java
+agent, and a separately built Spring initializer that neutralizes unrelated
+eager AWS demo beans. This runtime overlay is disclosed and validated in every
+artifact.

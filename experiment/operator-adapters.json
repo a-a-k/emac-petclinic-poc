@@ -1,0 +1,30 @@
+{
+  "schemaVersion": "emac.operator-adapters/v1",
+  "adapters": [
+    {
+      "id": "resilience4j-circuitbreaker-v1",
+      "operatorType": "circuit-breaker",
+      "metrics": {
+        "state": "resilience4j_circuitbreaker_state",
+        "calls": "resilience4j_circuitbreaker_calls_seconds_count",
+        "notPermitted": "resilience4j_circuitbreaker_not_permitted_calls_total"
+      },
+      "labels": {
+        "operator": "name",
+        "state": "state",
+        "callKind": "kind",
+        "serviceName": "service",
+        "serviceInstanceId": "replica"
+      },
+      "semantics": {
+        "openState": "OPEN",
+        "permittedKinds": [
+          "successful",
+          "failed",
+          "ignored"
+        ],
+        "successfulKind": "successful"
+      }
+    }
+  ]
+}

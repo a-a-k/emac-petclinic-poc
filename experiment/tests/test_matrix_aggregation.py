@@ -13,17 +13,28 @@ from plan_replacements import replacement_matrix  # noqa: E402
 def pair(ordinal: int, valid: bool) -> dict[str, object]:
     control = {
         "condition": "control",
-        "typedDelta": [],
+        "discovery": {"stateChanges": [], "operatorBindings": []},
+        "validity": {"checks": {}},
         "comparison": {
             "owner-history": {
-                "evidenceReconciledAbsoluteError": 0.0,
+                "modelDiscoveredAbsoluteError": 0.0,
+                "manualDynamicAbsoluteError": 0.0,
                 "frozenAbsoluteError": 0.0,
                 "frozenTargetSideError": False,
             },
             "owner-only": {},
         },
     }
-    treatment = {**control, "condition": "treatment"}
+    treatment = {
+        **control,
+        "condition": "treatment",
+        "validity": {
+            "checks": {
+                "exactStateDeltaRecovery": True,
+                "uniqueOperatorEdgeBindingRecovery": True,
+            }
+        },
+    }
     return {
         "pairId": f"confirmatory-pair-{ordinal:02d}",
         "valid": valid,

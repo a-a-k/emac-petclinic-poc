@@ -1,4 +1,4 @@
-name: EmaC paired block
+name: EmaC discovery paired block
 
 on:
   workflow_call:
@@ -35,7 +35,10 @@ jobs:
   pair:
     if: inputs.enabled
     runs-on: ubuntu-24.04
-    timeout-minutes: 50
+    # Keep the job-level ceiling at GitHub's maximum. The experiment step has a
+    # lower ceiling so `always()` diagnostics, teardown, and artifact upload
+    # still run when the experiment itself stalls.
+    timeout-minutes: 360
     continue-on-error: ${{ !inputs.enforce_validity }}
     env:
       ARTIFACT_ROOT: artifacts/${{ inputs.artifact_label }}
@@ -65,6 +68,7 @@ jobs:
         run: docker compose --env-file "$COMPOSE_ENV" pull --quiet
 
       - name: Execute one paired block
+        timeout-minutes: 300
         shell: bash
         run: |
           set -euo pipefail
@@ -82,14 +86,21 @@ jobs:
 
       - name: Capture complete paired-block logs
         if: always()
+        timeout-minutes: 30
         shell: bash
         run: |
           mkdir -p "$ARTIFACT_ROOT"
           docker compose --env-file "$COMPOSE_ENV" ps --all --no-trunc > "$ARTIFACT_ROOT/compose-ps.txt" 2>&1 || true
           docker compose --env-file "$COMPOSE_ENV" logs --no-color --timestamps > "$ARTIFACT_ROOT/compose.log" 2>&1 || true
+          for journal in artifacts/fault-journal.jsonl artifacts/router-journal.jsonl; do
+            if [[ -f "$journal" ]]; then
+              cp "$journal" "$ARTIFACT_ROOT/"
+            fi
+          done
 
       - name: Tear down the isolated paired-block stack
         if: always()
+        timeout-minutes: 20
         run: docker compose --env-file "$COMPOSE_ENV" down --volumes --remove-orphans || true
 
       - name: Publish paired-block evidence
