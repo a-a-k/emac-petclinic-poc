@@ -652,7 +652,7 @@ def main() -> None:
     parser.add_argument("--pilot-pairs", type=int, default=1)
     parser.add_argument("--confirmatory-pairs", type=int, default=5)
     parser.add_argument("--max-replacement-pairs", type=int, default=2)
-    parser.add_argument("--seed", type=int, default=20270824)
+    parser.add_argument("--seed", type=int, default=824026)
     parser.add_argument("--stack-already-up", action="store_true")
     args = parser.parse_args()
 

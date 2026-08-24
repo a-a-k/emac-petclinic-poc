@@ -74,7 +74,7 @@ jobs:
           --pilot-pairs 1
           --confirmatory-pairs 5
           --max-replacement-pairs 2
-          --seed 20270824
+          --seed 824026
 
       - name: Capture complete Compose logs
         if: always()

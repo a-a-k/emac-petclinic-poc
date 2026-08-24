@@ -1,4 +1,4 @@
-# EmaC SEAMS 2027 Short artifact
+# EmaC PetClinic mechanism-feasibility artifact
 
 This repository contains a GitHub Actions-only mechanism-feasibility experiment
 for EmaC on the AWS Application Signals fork of Spring PetClinic.
@@ -17,4 +17,3 @@ the held-out oracle sends any outcome request.
 
 See [experiment/README.md](experiment/README.md) for the executable protocol,
 artifact layout, validity policy, and exact claim boundary.
-
