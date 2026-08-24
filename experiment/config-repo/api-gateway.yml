@@ -1,0 +1,50 @@
+server:
+  port: 8080
+  compression:
+    enabled: false
+
+spring:
+  reactor:
+    context-propagation: auto
+  cloud:
+    circuitbreaker:
+      bulkhead:
+        resilience4j:
+          enabled: false
+    discovery:
+      client:
+        simple:
+          instances:
+            customers-service:
+              - uri: http://customers-service:8081
+            visits-service:
+              - uri: http://visits-proxy:8082
+            vets-service:
+              - uri: http://vets-service:8083
+
+eureka:
+  client:
+    enabled: false
+    register-with-eureka: false
+    fetch-registry: false
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      getOwnerDetails:
+        slidingWindowType: COUNT_BASED
+        slidingWindowSize: 100
+        minimumNumberOfCalls: 100
+        failureRateThreshold: 50
+        slowCallRateThreshold: 100
+        slowCallDurationThreshold: 60s
+        permittedNumberOfCallsInHalfOpenState: 10
+        maxWaitDurationInHalfOpenState: 0
+        waitDurationInOpenState: 15m
+        automaticTransitionFromOpenToHalfOpenEnabled: false
+  timelimiter:
+    instances:
+      getOwnerDetails:
+        timeoutDuration: 4s
+        cancelRunningFuture: true
+

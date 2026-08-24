@@ -1,0 +1,7 @@
+artifacts/
+vendor/application-signals-demo/
+.pytest_cache/
+__pycache__/
+*.pyc
+.idea/
+.vscode/

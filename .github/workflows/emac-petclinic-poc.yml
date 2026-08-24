@@ -1,0 +1,99 @@
+name: EmaC PetClinic mechanism-feasibility PoC
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: emac-petclinic-confirmatory
+  cancel-in-progress: false
+
+jobs:
+  experiment:
+    name: 1 pilot + 5 paired confirmatory blocks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 330
+    env:
+      ARTIFACT_ROOT: artifacts/github-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - name: Check out EmaC artifact
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Materialize the pinned, unchanged AWS PetClinic fork
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_commit="$(sed -n 's/^commit=//p' experiment/upstream.lock)"
+          source_repo="$(sed -n 's/^repository=//p' experiment/upstream.lock)"
+          git clone --filter=blob:none --no-checkout "$source_repo" vendor/application-signals-demo
+          git -C vendor/application-signals-demo checkout --detach "$source_commit"
+          test "$(git -C vendor/application-signals-demo rev-parse HEAD)" = "$source_commit"
+          test -z "$(git -C vendor/application-signals-demo status --porcelain)"
+
+      - name: Validate adapters and fixed declarations
+        run: python3 -m unittest discover -s experiment/tests -v
+
+      - name: Resolve Compose and pull pinned observability images
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker compose --env-file experiment/images.lock.env config --quiet
+          docker compose --env-file experiment/images.lock.env pull --ignore-buildable
+
+      - name: Build the full PetClinic stack once
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker compose --env-file experiment/images.lock.env build --parallel
+
+      - name: Capture the pinned gateway dependency tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$ARTIFACT_ROOT/inputs"
+          set -a
+          source experiment/images.lock.env
+          set +a
+          docker build \
+            --target build \
+            --build-arg MAVEN_IMAGE="$MAVEN_IMAGE" \
+            --build-arg JAVA_IMAGE="$JAVA_IMAGE" \
+            -f experiment/docker/petclinic.Dockerfile \
+            -t emac-petclinic-build:ci .
+          docker run --rm emac-petclinic-build:ci \
+            ./mvnw --batch-mode -pl spring-petclinic-api-gateway dependency:tree \
+            > "$ARTIFACT_ROOT/inputs/gateway-dependency-tree.txt"
+
+      - name: Execute pilot and confirmatory protocol
+        run: >-
+          python3 experiment/scripts/run_experiment.py
+          --output "$ARTIFACT_ROOT/run"
+          --pilot-pairs 1
+          --confirmatory-pairs 5
+          --max-replacement-pairs 2
+          --seed 20270824
+
+      - name: Capture complete Compose logs
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p "$ARTIFACT_ROOT"
+          docker compose --env-file experiment/images.lock.env ps --all --no-trunc > "$ARTIFACT_ROOT/compose-ps.txt" 2>&1 || true
+          docker compose --env-file experiment/images.lock.env logs --no-color --timestamps > "$ARTIFACT_ROOT/compose.log" 2>&1 || true
+
+      - name: Tear down the ephemeral CI stack
+        if: always()
+        run: docker compose --env-file experiment/images.lock.env down --volumes --remove-orphans || true
+
+      - name: Publish reproducibility bundle
+        if: always()
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08
+        with:
+          name: emac-petclinic-poc-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 1
+

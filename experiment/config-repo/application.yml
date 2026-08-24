@@ -1,0 +1,43 @@
+# Experiment-scoped common configuration. The Config Server reads this directory
+# via its native backend; no mutable remote configuration is consulted.
+server:
+  shutdown: graceful
+
+spring:
+  sql:
+    init:
+      schema-locations: classpath*:db/hsqldb/schema.sql
+      data-locations: classpath*:db/hsqldb/data.sql
+  cloud:
+    config:
+      allow-override: true
+      override-none: true
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: none
+
+management:
+  endpoint:
+    health:
+      probes:
+        enabled: true
+    prometheus:
+      enabled: true
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+
+eureka:
+  instance:
+    prefer-ip-address: true
+
+logging:
+  level:
+    org.springframework: INFO
+

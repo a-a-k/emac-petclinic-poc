@@ -1,0 +1,6 @@
+repository=https://github.com/aws-observability/application-signals-demo.git
+commit=a6619308ef610c0002ce03eedbaf6672a4fc5cae
+config_repository=https://github.com/spring-petclinic/spring-petclinic-microservices-config.git
+config_reference_commit=323993ce2519c6d02df63e08bf4458d123d3b611
+note=The experiment uses the first repository unchanged and a checked-in, experiment-scoped native Config Server snapshot derived from the second.
+

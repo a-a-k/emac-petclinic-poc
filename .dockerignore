@@ -1,0 +1,8 @@
+**
+!vendor/
+!vendor/application-signals-demo/
+!vendor/application-signals-demo/**
+!experiment/
+!experiment/docker/
+!experiment/docker/**
+

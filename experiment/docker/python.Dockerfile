@@ -1,0 +1,6 @@
+ARG PYTHON_IMAGE
+FROM ${PYTHON_IMAGE}
+WORKDIR /experiment
+COPY experiment/scripts/ /experiment/scripts/
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+

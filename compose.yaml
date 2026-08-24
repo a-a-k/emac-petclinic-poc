@@ -1,0 +1,284 @@
+name: emac-petclinic
+
+x-petclinic-build: &petclinic-build
+  context: .
+  dockerfile: experiment/docker/petclinic.Dockerfile
+  args:
+    MAVEN_IMAGE: ${MAVEN_IMAGE}
+    JAVA_IMAGE: ${JAVA_IMAGE}
+
+x-otel-env: &otel-env
+  JAVA_TOOL_OPTIONS: -javaagent:/otel/opentelemetry-javaagent.jar
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+  OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+  OTEL_METRICS_EXPORTER: none
+  OTEL_LOGS_EXPORTER: none
+  OTEL_TRACES_SAMPLER: always_on
+
+x-app-env: &app-env
+  SPRING_PROFILES_ACTIVE: docker
+  CONFIG_SERVER_URL: http://config-server:8888/
+  DISCOVERY_SERVER_URL: http://discovery-server:8761/eureka/
+
+x-app-health: &app-health
+  interval: 5s
+  timeout: 3s
+  retries: 60
+  start_period: 30s
+
+services:
+  jaeger:
+    image: ${JAEGER_IMAGE}
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+      MEMORY_MAX_TRACES: "30000"
+    ports:
+      - "16686:16686"
+
+  otel-collector:
+    image: ${OTELCOL_IMAGE}
+    command: [--config=/etc/otelcol-contrib/config.yml]
+    volumes:
+      - ./experiment/otel-collector.yml:/etc/otelcol-contrib/config.yml:ro
+    depends_on:
+      - jaeger
+
+  config-server:
+    build:
+      <<: *petclinic-build
+      args:
+        MAVEN_IMAGE: ${MAVEN_IMAGE}
+        JAVA_IMAGE: ${JAVA_IMAGE}
+        MODULE: spring-petclinic-config-server
+    environment:
+      <<: *otel-env
+      SPRING_PROFILES_ACTIVE: native
+      GIT_REPO: /experiment-config
+      OTEL_SERVICE_NAME: config-server
+      OTEL_RESOURCE_ATTRIBUTES: service.instance.id=config-server-1
+    volumes:
+      - ./experiment/config-repo:/experiment-config:ro
+    ports:
+      - "18888:8888"
+    healthcheck:
+      test: [CMD, curl, -fsS, http://localhost:8888/actuator/health]
+      <<: *app-health
+
+  discovery-server:
+    build:
+      <<: *petclinic-build
+      args:
+        MAVEN_IMAGE: ${MAVEN_IMAGE}
+        JAVA_IMAGE: ${JAVA_IMAGE}
+        MODULE: spring-petclinic-discovery-server
+    environment:
+      <<: [*otel-env, *app-env]
+      OTEL_SERVICE_NAME: discovery-server
+      OTEL_RESOURCE_ATTRIBUTES: service.instance.id=discovery-server-1
+    ports:
+      - "18761:8761"
+    depends_on:
+      config-server:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, curl, -fsS, http://localhost:8761/actuator/health]
+      <<: *app-health
+
+  customers-service:
+    build:
+      <<: *petclinic-build
+      args:
+        MAVEN_IMAGE: ${MAVEN_IMAGE}
+        JAVA_IMAGE: ${JAVA_IMAGE}
+        MODULE: spring-petclinic-customers-service
+    environment:
+      <<: [*otel-env, *app-env]
+      OTEL_SERVICE_NAME: customers-service
+      OTEL_RESOURCE_ATTRIBUTES: service.instance.id=customers-1
+    ports:
+      - "18083:8081"
+    depends_on:
+      config-server:
+        condition: service_healthy
+      discovery-server:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, curl, -fsS, http://localhost:8081/actuator/health]
+      <<: *app-health
+
+  visits-service:
+    build:
+      <<: *petclinic-build
+      args:
+        MAVEN_IMAGE: ${MAVEN_IMAGE}
+        JAVA_IMAGE: ${JAVA_IMAGE}
+        MODULE: spring-petclinic-visits-service
+    environment:
+      <<: [*otel-env, *app-env]
+      OTEL_SERVICE_NAME: visits-service
+      OTEL_RESOURCE_ATTRIBUTES: service.instance.id=visits-1
+    ports:
+      - "18084:8082"
+    depends_on:
+      config-server:
+        condition: service_healthy
+      discovery-server:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, curl, -fsS, http://localhost:8082/actuator/health]
+      <<: *app-health
+
+  vets-service:
+    build:
+      <<: *petclinic-build
+      args:
+        MAVEN_IMAGE: ${MAVEN_IMAGE}
+        JAVA_IMAGE: ${JAVA_IMAGE}
+        MODULE: spring-petclinic-vets-service
+    environment:
+      <<: [*otel-env, *app-env]
+      OTEL_SERVICE_NAME: vets-service
+      OTEL_RESOURCE_ATTRIBUTES: service.instance.id=vets-1
+    ports:
+      - "18085:8083"
+    depends_on:
+      config-server:
+        condition: service_healthy
+      discovery-server:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, curl, -fsS, http://localhost:8083/actuator/health]
+      <<: *app-health
+
+  admin-server:
+    build:
+      <<: *petclinic-build
+      args:
+        MAVEN_IMAGE: ${MAVEN_IMAGE}
+        JAVA_IMAGE: ${JAVA_IMAGE}
+        MODULE: spring-petclinic-admin-server
+    environment:
+      <<: [*otel-env, *app-env]
+      OTEL_SERVICE_NAME: admin-server
+      OTEL_RESOURCE_ATTRIBUTES: service.instance.id=admin-server-1
+    ports:
+      - "19090:9090"
+    depends_on:
+      config-server:
+        condition: service_healthy
+      discovery-server:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, curl, -fsS, http://localhost:9090/actuator/health]
+      <<: *app-health
+
+  visits-proxy:
+    build:
+      context: .
+      dockerfile: experiment/docker/python.Dockerfile
+      args:
+        PYTHON_IMAGE: ${PYTHON_IMAGE}
+    command: [python, /experiment/scripts/fault_proxy.py]
+    environment:
+      BACKEND_URL: http://visits-service:8082
+      DATA_PORT: "8082"
+      CONTROL_PORT: "8474"
+      JOURNAL_PATH: /artifacts/fault-journal.jsonl
+    volumes:
+      - ./artifacts:/artifacts
+    ports:
+      - "18086:8082"
+      - "18474:8474"
+    depends_on:
+      visits-service:
+        condition: service_healthy
+
+  gateway-a:
+    build:
+      <<: *petclinic-build
+      args:
+        MAVEN_IMAGE: ${MAVEN_IMAGE}
+        JAVA_IMAGE: ${JAVA_IMAGE}
+        MODULE: spring-petclinic-api-gateway
+    environment:
+      <<: [*otel-env, *app-env]
+      OTEL_SERVICE_NAME: api-gateway
+      OTEL_RESOURCE_ATTRIBUTES: service.instance.id=gateway-A
+    ports:
+      - "18081:8080"
+    depends_on:
+      config-server:
+        condition: service_healthy
+      customers-service:
+        condition: service_healthy
+      visits-proxy:
+        condition: service_started
+    healthcheck:
+      test: [CMD, curl, -fsS, http://localhost:8080/actuator/health]
+      <<: *app-health
+
+  gateway-b:
+    build:
+      <<: *petclinic-build
+      args:
+        MAVEN_IMAGE: ${MAVEN_IMAGE}
+        JAVA_IMAGE: ${JAVA_IMAGE}
+        MODULE: spring-petclinic-api-gateway
+    environment:
+      <<: [*otel-env, *app-env]
+      OTEL_SERVICE_NAME: api-gateway
+      OTEL_RESOURCE_ATTRIBUTES: service.instance.id=gateway-B
+    ports:
+      - "18082:8080"
+    depends_on:
+      config-server:
+        condition: service_healthy
+      customers-service:
+        condition: service_healthy
+      visits-proxy:
+        condition: service_started
+    healthcheck:
+      test: [CMD, curl, -fsS, http://localhost:8080/actuator/health]
+      <<: *app-health
+
+  router:
+    build:
+      context: .
+      dockerfile: experiment/docker/python.Dockerfile
+      args:
+        PYTHON_IMAGE: ${PYTHON_IMAGE}
+    command: [python, /experiment/scripts/router.py]
+    environment:
+      GATEWAY_A_URL: http://gateway-a:8080
+      GATEWAY_B_URL: http://gateway-b:8080
+      DATA_PORT: "8080"
+      CONTROL_PORT: "8475"
+      B_EVERY: "100"
+      JOURNAL_PATH: /artifacts/router-journal.jsonl
+    volumes:
+      - ./artifacts:/artifacts
+    ports:
+      - "18080:8080"
+      - "18475:8475"
+    depends_on:
+      gateway-a:
+        condition: service_healthy
+      gateway-b:
+        condition: service_healthy
+
+  prometheus:
+    image: ${PROMETHEUS_IMAGE}
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=6h
+    volumes:
+      - ./experiment/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "19091:9090"
+    depends_on:
+      gateway-a:
+        condition: service_healthy
+      gateway-b:
+        condition: service_healthy
+
