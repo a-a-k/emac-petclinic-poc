@@ -97,10 +97,14 @@ The configuration explicitly pins CircuitBreaker and TimeLimiter properties and
 disables the Spring Cloud Resilience4j Bulkhead wrapper. The 15-minute open-state
 budget is checked against each condition duration.
 
-The AWS fork constructs DynamoDB, SQS, and Kinesis clients during application
-startup. A digest-pinned LocalStack container supplies those APIs inside the
-ephemeral Compose network using fixed dummy credentials and the SDK's standard
-endpoint override. No request leaves the GitHub runner for an AWS data-plane API.
+The AWS fork eagerly constructs DynamoDB, SQS, Kinesis, S3, and Bedrock demo
+components even though none participates in the declared journey. Its pinned
+AWS SDK predates the standard endpoint-override environment variables. An
+experiment-only Spring initializer therefore replaces exactly the upstream
+PetClinic components in `.aws.` packages with constructor-free inert instances
+after component scanning. The full standard PetClinic service stack and the
+owner-history code path remain unchanged. Every replacement is emitted as an
+`EMAC_AWS_DEMO_NEUTRALIZED` startup record, and no AWS data-plane API is called.
 
 ## Reproducibility bundle
 

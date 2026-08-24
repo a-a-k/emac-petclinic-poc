@@ -37,7 +37,6 @@ PROM_ENDPOINTS = {
     "visits": "http://localhost:18084/actuator/prometheus",
 }
 HEALTH_ENDPOINTS = {
-    "localstack": "http://localhost:14566/_localstack/health",
     "config": "http://localhost:18888/actuator/health",
     "discovery": "http://localhost:18761/actuator/health",
     "customers": "http://localhost:18083/actuator/health",
@@ -90,7 +89,7 @@ def wait_http(name: str, url: str, deadline_seconds: int = 300) -> None:
         try:
             status, _headers, body = request(url, timeout=3)
             if status // 100 == 2:
-                if name not in {"localstack", "router", "fault-proxy", "jaeger"}:
+                if name not in {"router", "fault-proxy", "jaeger"}:
                     payload = json.loads(body)
                     if str(payload.get("status", "")).upper() != "UP":
                         raise RuntimeError(f"health status is {payload}")
@@ -126,6 +125,41 @@ def wait_stack(names: tuple[str, ...] | None = None) -> None:
     selected = names or tuple(HEALTH_ENDPOINTS)
     for name in selected:
         wait_http(name, HEALTH_ENDPOINTS[name])
+
+
+def verify_runtime_isolation(output: Path) -> None:
+    expected = {
+        "config-server": 0,
+        "discovery-server": 0,
+        "customers-service": 8,
+        "visits-service": 1,
+        "vets-service": 1,
+        "admin-server": 0,
+        "gateway-a": 0,
+        "gateway-b": 0,
+    }
+    records: dict[str, object] = {}
+    log_dir = output / "inputs" / "startup"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    for service, expected_count in expected.items():
+        service_log = compose("logs", "--no-color", service, capture=True)
+        (log_dir / f"{service}.log").write_text(service_log, encoding="utf-8")
+        marker = f"EMAC_AWS_DEMO_NEUTRALIZER count={expected_count}"
+        if marker not in service_log:
+            raise RuntimeError(
+                f"{service} did not emit required runtime-isolation marker {marker!r}"
+            )
+        replacements = service_log.count("EMAC_AWS_DEMO_NEUTRALIZED bean=")
+        if replacements != expected_count:
+            raise RuntimeError(
+                f"{service} neutralized {replacements} AWS demo beans; expected {expected_count}"
+            )
+        records[service] = {
+            "expectedNeutralized": expected_count,
+            "observedNeutralized": replacements,
+            "marker": marker,
+        }
+    write_json(output / "inputs" / "runtime-isolation.json", records)
 
 
 def snapshot(destination: Path, phase: str) -> None:
@@ -601,6 +635,7 @@ def main() -> None:
     if not args.stack_already_up:
         compose("up", "--build", "-d")
     wait_stack()
+    verify_runtime_isolation(output)
     capture_environment(output)
 
     all_pairs: list[dict[str, object]] = []

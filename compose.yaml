@@ -8,12 +8,8 @@ x-petclinic-build: &petclinic-build
     JAVA_IMAGE: ${JAVA_IMAGE}
 
 x-otel-env: &otel-env
-  JAVA_TOOL_OPTIONS: >-
-    -javaagent:/otel/opentelemetry-javaagent.jar
-    -Daws.endpointUrl.dynamodb=http://localstack:4566
-    -Daws.endpointUrl.sqs=http://localstack:4566
-    -Daws.endpointUrl.kinesis=http://localstack:4566
-    -Daws.endpointUrl.s3=http://localstack:4566
+  JAVA_TOOL_OPTIONS: -javaagent:/otel/opentelemetry-javaagent.jar
+  EMAC_NEUTRALIZE_AWS_DEMO_COMPONENTS: "true"
   OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
   OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
   OTEL_METRICS_EXPORTER: none
@@ -30,11 +26,6 @@ x-app-env: &app-env
   AWS_DEFAULT_REGION: us-east-1
   REGION_FROM_ECS: us-east-1
   AWS_EC2_METADATA_DISABLED: "true"
-  AWS_ENDPOINT_URL: http://localstack:4566
-  AWS_ENDPOINT_URL_DYNAMODB: http://localstack:4566
-  AWS_ENDPOINT_URL_SQS: http://localstack:4566
-  AWS_ENDPOINT_URL_KINESIS: http://localstack:4566
-  AWS_ENDPOINT_URL_S3: http://localstack:4566
 
 x-app-health: &app-health
   interval: 5s
@@ -43,21 +34,6 @@ x-app-health: &app-health
   start_period: 30s
 
 services:
-  localstack:
-    image: ${LOCALSTACK_IMAGE}
-    environment:
-      SERVICES: dynamodb,sqs,kinesis,s3
-      DEBUG: "0"
-      PERSISTENCE: "0"
-    ports:
-      - "14566:4566"
-    healthcheck:
-      test: [CMD, curl, -fsS, http://localhost:4566/_localstack/health]
-      interval: 5s
-      timeout: 3s
-      retries: 30
-      start_period: 10s
-
   jaeger:
     image: ${JAEGER_IMAGE}
     environment:
@@ -133,8 +109,6 @@ services:
         condition: service_healthy
       discovery-server:
         condition: service_healthy
-      localstack:
-        condition: service_healthy
     healthcheck:
       test: [CMD, curl, -fsS, http://localhost:8081/actuator/health]
       <<: *app-health
@@ -157,8 +131,6 @@ services:
         condition: service_healthy
       discovery-server:
         condition: service_healthy
-      localstack:
-        condition: service_healthy
     healthcheck:
       test: [CMD, curl, -fsS, http://localhost:8082/actuator/health]
       <<: *app-health
@@ -180,8 +152,6 @@ services:
       config-server:
         condition: service_healthy
       discovery-server:
-        condition: service_healthy
-      localstack:
         condition: service_healthy
     healthcheck:
       test: [CMD, curl, -fsS, http://localhost:8083/actuator/health]

@@ -2,6 +2,12 @@
   "schemaVersion": "emac.poc-protocol/v1",
   "claimClass": "mechanism-feasibility",
   "upstreamCommit": "a6619308ef610c0002ce03eedbaf6672a4fc5cae",
+  "runtimeIsolation": {
+    "mode": "neutralize unused eager AWS demo components after component scanning",
+    "scope": "org.springframework.samples.petclinic.*.aws.*",
+    "journeyComponentsAffected": false,
+    "requiredStartupRecord": "EMAC_AWS_DEMO_NEUTRALIZER"
+  },
   "replication": {
     "pilotPairs": 1,
     "confirmatoryPairs": 5,
@@ -41,8 +47,8 @@
       "The condition completes before waitDurationInOpenState elapses.",
       "TimeLimiter timeout count is zero in evidence and outcome windows.",
       "Router allocation is exactly 9900/100 in each 10000-request window.",
-      "Boundary values use direct actuator snapshots and exact counter subtraction."
+      "Boundary values use direct actuator snapshots and exact counter subtraction.",
+      "Every application process emits an EMAC_AWS_DEMO_NEUTRALIZER startup record with the expected replacement count."
     ]
   }
 }
-

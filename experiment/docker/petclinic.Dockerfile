@@ -5,6 +5,8 @@ FROM ${MAVEN_IMAGE} AS build
 WORKDIR /source
 COPY vendor/application-signals-demo/ ./
 RUN mvn --batch-mode -DskipTests -Dcheckstyle.skip=true package
+COPY experiment/runtime-support/ /runtime-support/
+RUN mvn --batch-mode -f /runtime-support/pom.xml package
 
 FROM alpine:3.20.3@sha256:1e42bbe2508154c9126d48c2b8a75420c3544343bf86fd041fb7527e017a4b4a AS agent
 ARG OTEL_AGENT_VERSION=2.11.0
@@ -19,6 +21,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=build /source/${MODULE}/target/${MODULE}-2.6.7.jar /application.jar
+COPY --from=build /runtime-support/target/emac-petclinic-runtime-support-1.0.0.jar /experiment-support/
 COPY --from=agent /opentelemetry-javaagent.jar /otel/opentelemetry-javaagent.jar
 EXPOSE 8080
-ENTRYPOINT ["java", "-jar", "/application.jar"]
+ENTRYPOINT ["java", "-Dloader.path=/experiment-support/", "-cp", "/application.jar", "org.springframework.boot.loader.PropertiesLauncher"]
