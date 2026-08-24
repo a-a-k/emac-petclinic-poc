@@ -204,10 +204,33 @@ def timelimiter_timeouts(start: list[Sample], end: list[Sample], operator: str) 
     )
 
 
-def http_server_availability(start: list[Sample], end: list[Sample], uri_contains: str) -> dict[str, float | int | None]:
-    suffix = "http_server_requests_seconds_count"
-    start_map = _series_map(start, suffix)
-    end_map = _series_map(end, suffix)
+def http_server_availability(
+    start: list[Sample], end: list[Sample], uri_contains: str
+) -> dict[str, object]:
+    # Spring's `@Timed` business endpoints replace the generic HTTP meter with
+    # an application-specific timer name. Discover that timer family from the
+    # standard HTTP labels instead of assuming `http_server_requests_seconds`.
+    metric_families = sorted(
+        {
+            sample.name
+            for sample in end
+            if sample.name.endswith("_seconds_count")
+            and uri_contains
+            in sample.labels.get("uri", sample.labels.get("http_route", ""))
+            and not sample.labels.get("uri", "").startswith("/actuator")
+        }
+    )
+    if len(metric_families) != 1:
+        return {
+            "successful": 0,
+            "total": 0,
+            "availability": None,
+            "matchedUris": [],
+            "metricCandidates": metric_families,
+        }
+    metric_name = metric_families[0]
+    start_map = _series_map_exact(start, metric_name)
+    end_map = _series_map_exact(end, metric_name)
     total_count = 0
     success_count = 0
     matched_uris: set[str] = set()
@@ -231,6 +254,7 @@ def http_server_availability(start: list[Sample], end: list[Sample], uri_contain
         "total": total_count,
         "availability": success_count / total_count if total_count else None,
         "matchedUris": sorted(matched_uris),
+        "metricName": metric_name,
     }
 
 
@@ -240,3 +264,11 @@ def _series_map(samples: Iterable[Sample], name_suffix: str) -> dict[tuple[tuple
         if sample.name.endswith(name_suffix):
             result[tuple(sorted(sample.labels.items()))] = sample.value
     return result
+
+
+def _series_map_exact(samples: Iterable[Sample], name: str) -> dict[tuple[tuple[str, str], ...], float]:
+    return {
+        tuple(sorted(sample.labels.items())): sample.value
+        for sample in samples
+        if sample.name == name
+    }

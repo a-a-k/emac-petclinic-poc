@@ -20,6 +20,7 @@ from evidence import (  # noqa: E402
     adapter_operator_state,
     discover_metric_identity,
     discover_operator_names,
+    http_server_availability,
     parse_prometheus,
 )
 from manual_composite import evaluate as manual_evaluate  # noqa: E402
@@ -124,6 +125,19 @@ class DiscoveryTests(unittest.TestCase):
         counts = adapter_operator_counts(start, end, self.adapter, "getOwnerDetails")
         self.assertEqual(counts["permitted"], 99)
         self.assertEqual(counts["notPermitted"], 1)
+
+    def test_local_availability_discovers_custom_timed_metric_family(self) -> None:
+        start = parse_prometheus(
+            'petclinic_owner_seconds_count{outcome="SUCCESS",status="200",uri="/owners/{ownerId}"} 10\n'
+        )
+        end = parse_prometheus(
+            'petclinic_owner_seconds_count{outcome="SUCCESS",status="200",uri="/owners/{ownerId}"} 30\n'
+            'http_server_requests_seconds_count{outcome="SUCCESS",status="200",uri="/actuator/health"} 50\n'
+        )
+        result = http_server_availability(start, end, "/owners/")
+        self.assertEqual(result["metricName"], "petclinic_owner_seconds_count")
+        self.assertEqual(result["total"], 20)
+        self.assertEqual(result["availability"], 1.0)
 
     def test_trace_normalizer_discovers_targets_from_span_parentage(self) -> None:
         trace = {
