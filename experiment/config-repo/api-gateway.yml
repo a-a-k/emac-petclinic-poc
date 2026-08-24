@@ -39,7 +39,7 @@ resilience4j:
         slowCallRateThreshold: 100
         slowCallDurationThreshold: 60s
         permittedNumberOfCallsInHalfOpenState: 10
-        maxWaitDurationInHalfOpenState: 0
+        maxWaitDurationInHalfOpenState: 1ms
         waitDurationInOpenState: 15m
         automaticTransitionFromOpenToHalfOpenEnabled: false
   timelimiter:
@@ -47,4 +47,3 @@ resilience4j:
       getOwnerDetails:
         timeoutDuration: 4s
         cancelRunningFuture: true
-
