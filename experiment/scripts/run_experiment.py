@@ -89,7 +89,7 @@ def wait_http(name: str, url: str, deadline_seconds: int = 300) -> None:
         try:
             status, _headers, body = request(url, timeout=3)
             if status // 100 == 2:
-                if name not in {"router", "fault-proxy", "jaeger"}:
+                if name not in {"config", "router", "fault-proxy", "jaeger"}:
                     payload = json.loads(body)
                     if str(payload.get("status", "")).upper() != "UP":
                         raise RuntimeError(f"health status is {payload}")

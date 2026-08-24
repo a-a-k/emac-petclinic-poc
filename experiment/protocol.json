@@ -41,6 +41,7 @@
   "validity": {
     "required": [
       "Both gateway processes restarted before each condition.",
+      "Config Server returns HTTP 2xx and every dependent Spring service reports actuator status UP.",
       "No non-experiment traffic occurs between boundary snapshots.",
       "The treatment breaker is OPEN and the control breaker is CLOSED after preconditioning.",
       "Visits is healthy after the preconditioning fault is disabled.",
