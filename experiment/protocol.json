@@ -10,9 +10,11 @@
   },
   "replication": {
     "pilotPairs": 1,
-    "confirmatoryPairs": 5,
+    "confirmatoryPairs": 20,
+    "pairJobMaxParallel": 20,
+    "sharedImagePolicy": "Build once from the pinned source commit, publish with the experiment commit SHA, and pull the identical image set in every paired-block job.",
     "conditionOrder": "seeded random permutation within each pair",
-    "invalidReplacementPolicy": "Run one replacement pair for an invalid pair; retain every invalid attempt in artifacts; never filter individual condition-runs."
+    "invalidReplacementPolicy": "After all 20 primary pairs finish, run at most two replacement pairs for missing or invalid pairs; retain every attempt in artifacts; never filter individual condition-runs."
   },
   "routing": {
     "gatewayA": 0.99,

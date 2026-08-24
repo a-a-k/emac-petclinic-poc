@@ -26,7 +26,9 @@ from evidence import circuitbreaker_counts, circuitbreaker_state, load_snapshot
 ROOT = Path(__file__).resolve().parents[2]
 PROTOCOL_PATH = ROOT / "experiment" / "protocol.json"
 MODEL_PATH = ROOT / "experiment" / "journey-model.json"
-ENV_FILE = ROOT / "experiment" / "images.lock.env"
+ENV_FILE = Path(
+    os.environ.get("EMAC_COMPOSE_ENV", str(ROOT / "experiment" / "images.lock.env"))
+).resolve()
 ROUTER_DATA = "http://localhost:18080"
 ROUTER_CONTROL = "http://localhost:18475"
 FAULT_CONTROL = "http://localhost:18474"
@@ -649,11 +651,10 @@ def capture_environment(output: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--pilot-pairs", type=int, default=1)
-    parser.add_argument("--confirmatory-pairs", type=int, default=5)
-    parser.add_argument("--max-replacement-pairs", type=int, default=2)
+    parser.add_argument("--phase", choices=("pilot", "confirmatory"), required=True)
+    parser.add_argument("--pair-ordinal", type=int, required=True)
     parser.add_argument("--seed", type=int, default=824026)
-    parser.add_argument("--stack-already-up", action="store_true")
+    parser.add_argument("--allow-invalid", action="store_true")
     args = parser.parse_args()
 
     heartbeat_stop = threading.Event()
@@ -664,45 +665,31 @@ def main() -> None:
     output.mkdir(parents=True, exist_ok=False)
     protocol = read_json(PROTOCOL_PATH)
     try:
-        if not args.stack_already_up:
-            progress("stack-up-start")
-            compose("up", "--build", "-d")
+        progress("stack-up-start")
+        compose("up", "--no-build", "-d")
         wait_stack()
         progress("stack-ready")
         verify_runtime_isolation(output)
         progress("runtime-isolation-verified")
         capture_environment(output)
 
-        all_pairs: list[dict[str, object]] = []
-        for ordinal in range(1, args.pilot_pairs + 1):
-            pair = run_pair(output, "pilot", ordinal, args.seed + ordinal, protocol)
-            all_pairs.append(pair)
-
-        confirmatory: list[dict[str, object]] = []
-        ordinal = 0
-        invalid = 0
-        while len([pair for pair in confirmatory if pair["valid"]]) < args.confirmatory_pairs:
-            ordinal += 1
-            if ordinal > args.confirmatory_pairs + args.max_replacement_pairs:
-                break
-            pair = run_pair(output, "confirmatory", ordinal, args.seed + 10_000 + ordinal, protocol)
-            confirmatory.append(pair)
-            all_pairs.append(pair)
-            if not pair["valid"]:
-                invalid += 1
-
-        report = summarize(confirmatory, all_pairs)
-        report["requestedConfirmatoryPairs"] = args.confirmatory_pairs
-        report["replacementPairsUsed"] = invalid
+        pair = run_pair(output, args.phase, args.pair_ordinal, args.seed, protocol)
+        confirmatory = [pair] if args.phase == "confirmatory" else []
+        report = summarize(confirmatory, [pair])
+        report["phase"] = args.phase
+        report["pairOrdinal"] = args.pair_ordinal
+        report["requestedConfirmatoryPairs"] = 1 if args.phase == "confirmatory" else 0
+        report["replacementPairsUsed"] = 0
         write_json(output / "report.json", report)
         write_markdown(output / "report.md", report)
         progress(
-            "protocol-complete",
-            valid_confirmatory=report["confirmatoryPairsRetained"],
-            requested=args.confirmatory_pairs,
+            "pair-job-complete",
+            phase=args.phase,
+            pair_ordinal=args.pair_ordinal,
+            valid=pair["valid"],
         )
-        if report["confirmatoryPairsRetained"] < args.confirmatory_pairs:
-            raise SystemExit("confirmatory run did not produce the predeclared number of valid pairs")
+        if not pair["valid"] and not args.allow_invalid:
+            raise SystemExit(f"{args.phase} pair {args.pair_ordinal} failed validity checks")
     finally:
         heartbeat_stop.set()
         heartbeat_thread.join(timeout=2)

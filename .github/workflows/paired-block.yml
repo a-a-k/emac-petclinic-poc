@@ -1,0 +1,103 @@
+name: EmaC paired block
+
+on:
+  workflow_call:
+    inputs:
+      phase:
+        required: true
+        type: string
+      pair_ordinal:
+        required: true
+        type: number
+      seed_base:
+        required: true
+        type: number
+      image_tag:
+        required: true
+        type: string
+      artifact_label:
+        required: true
+        type: string
+      enabled:
+        required: false
+        default: true
+        type: boolean
+      enforce_validity:
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  pair:
+    if: inputs.enabled
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    continue-on-error: ${{ !inputs.enforce_validity }}
+    env:
+      ARTIFACT_ROOT: artifacts/${{ inputs.artifact_label }}
+      COMPOSE_ENV: experiment/ci-images.env
+      EMAC_COMPOSE_ENV: experiment/ci-images.env
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - name: Check out the frozen experiment commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Resolve commit-pinned GHCR image coordinates
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp experiment/images.lock.env "$COMPOSE_ENV"
+          echo "APP_IMAGE_PREFIX=ghcr.io/${GITHUB_REPOSITORY}" >> "$COMPOSE_ENV"
+          echo "APP_IMAGE_TAG=${{ inputs.image_tag }}" >> "$COMPOSE_ENV"
+
+      - name: Authenticate to GitHub Container Registry
+        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f1c3b
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull the single frozen image set
+        run: docker compose --env-file "$COMPOSE_ENV" pull --quiet
+
+      - name: Execute one paired block
+        shell: bash
+        run: |
+          set -euo pipefail
+          pair_seed=$((${{ inputs.seed_base }} + ${{ inputs.pair_ordinal }}))
+          validity_flag=""
+          if [[ "${{ inputs.enforce_validity }}" != "true" ]]; then
+            validity_flag="--allow-invalid"
+          fi
+          python3 experiment/scripts/run_experiment.py \
+            --output "$ARTIFACT_ROOT/run" \
+            --phase "${{ inputs.phase }}" \
+            --pair-ordinal "${{ inputs.pair_ordinal }}" \
+            --seed "$pair_seed" \
+            $validity_flag
+
+      - name: Capture complete paired-block logs
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p "$ARTIFACT_ROOT"
+          docker compose --env-file "$COMPOSE_ENV" ps --all --no-trunc > "$ARTIFACT_ROOT/compose-ps.txt" 2>&1 || true
+          docker compose --env-file "$COMPOSE_ENV" logs --no-color --timestamps > "$ARTIFACT_ROOT/compose.log" 2>&1 || true
+
+      - name: Tear down the isolated paired-block stack
+        if: always()
+        run: docker compose --env-file "$COMPOSE_ENV" down --volumes --remove-orphans || true
+
+      - name: Publish paired-block evidence
+        if: always()
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08
+        with:
+          name: emac-${{ inputs.artifact_label }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.ARTIFACT_ROOT }}/
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 1

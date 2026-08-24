@@ -4,10 +4,11 @@ This repository contains a GitHub Actions-only mechanism-feasibility experiment
 for EmaC on the AWS Application Signals fork of Spring PetClinic.
 
 The normative execution is [.github/workflows/emac-petclinic-poc.yml](.github/workflows/emac-petclinic-poc.yml).
-It performs one pilot pair and five confirmatory control/treatment pairs on an
-ephemeral GitHub-hosted runner, then publishes the complete reproducibility
-bundle as a workflow artifact. No CloudWatch account or local experiment run is
-required.
+It builds one immutable image set, executes one pilot pair, then executes twenty
+confirmatory control/treatment pairs concurrently on isolated GitHub-hosted
+runners. An aggregation job publishes the report; each paired block publishes
+its own reproducibility artifact. No CloudWatch account or local experiment run
+is required.
 
 The experiment is deliberately narrow: one predeclared Resilience4j
 `getOwnerDetails` circuit-breaker/fallback operator. Metrics identify its

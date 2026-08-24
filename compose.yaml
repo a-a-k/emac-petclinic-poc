@@ -51,6 +51,7 @@ services:
       - jaeger
 
   config-server:
+    image: ${APP_IMAGE_PREFIX:-emac-petclinic}-config-server:${APP_IMAGE_TAG:-local}
     build:
       <<: *petclinic-build
       args:
@@ -72,6 +73,7 @@ services:
       <<: *app-health
 
   discovery-server:
+    image: ${APP_IMAGE_PREFIX:-emac-petclinic}-discovery-server:${APP_IMAGE_TAG:-local}
     build:
       <<: *petclinic-build
       args:
@@ -92,6 +94,7 @@ services:
       <<: *app-health
 
   customers-service:
+    image: ${APP_IMAGE_PREFIX:-emac-petclinic}-customers-service:${APP_IMAGE_TAG:-local}
     build:
       <<: *petclinic-build
       args:
@@ -114,6 +117,7 @@ services:
       <<: *app-health
 
   visits-service:
+    image: ${APP_IMAGE_PREFIX:-emac-petclinic}-visits-service:${APP_IMAGE_TAG:-local}
     build:
       <<: *petclinic-build
       args:
@@ -136,6 +140,7 @@ services:
       <<: *app-health
 
   vets-service:
+    image: ${APP_IMAGE_PREFIX:-emac-petclinic}-vets-service:${APP_IMAGE_TAG:-local}
     build:
       <<: *petclinic-build
       args:
@@ -158,6 +163,7 @@ services:
       <<: *app-health
 
   admin-server:
+    image: ${APP_IMAGE_PREFIX:-emac-petclinic}-admin-server:${APP_IMAGE_TAG:-local}
     build:
       <<: *petclinic-build
       args:
@@ -180,6 +186,7 @@ services:
       <<: *app-health
 
   visits-proxy:
+    image: ${APP_IMAGE_PREFIX:-emac-petclinic}-experiment-python:${APP_IMAGE_TAG:-local}
     build:
       context: .
       dockerfile: experiment/docker/python.Dockerfile
@@ -201,6 +208,7 @@ services:
         condition: service_healthy
 
   gateway-a:
+    image: ${APP_IMAGE_PREFIX:-emac-petclinic}-gateway:${APP_IMAGE_TAG:-local}
     build:
       <<: *petclinic-build
       args:
@@ -225,6 +233,7 @@ services:
       <<: *app-health
 
   gateway-b:
+    image: ${APP_IMAGE_PREFIX:-emac-petclinic}-gateway:${APP_IMAGE_TAG:-local}
     build:
       <<: *petclinic-build
       args:
@@ -249,6 +258,7 @@ services:
       <<: *app-health
 
   router:
+    image: ${APP_IMAGE_PREFIX:-emac-petclinic}-experiment-python:${APP_IMAGE_TAG:-local}
     build:
       context: .
       dockerfile: experiment/docker/python.Dockerfile

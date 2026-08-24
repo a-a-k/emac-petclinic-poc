@@ -19,15 +19,18 @@ has no abbreviated local execution branch. Its fixed invocation is:
 
 ```text
 1 pilot pair
-5 valid confirmatory pairs
+20 valid confirmatory pairs in a pair-level GitHub Actions matrix
 control/treatment order randomized within each pair
 10,000 evidence requests per condition at 100 requests/s
 10,000 held-out outcome requests per condition at 100 requests/s
 ```
 
 An invalid pair is retained and replaced as a whole, up to the predeclared limit
-of two replacement pairs. The workflow fails if it cannot obtain five valid
-confirmatory pairs. Invalid attempts remain in the uploaded artifacts.
+of two replacement pairs. The workflow fails if it cannot obtain twenty valid
+confirmatory pairs. Invalid attempts remain in the uploaded artifacts. A single
+build job publishes commit-tagged application images to GHCR; the pilot and all
+matrix jobs pull that exact image set. Conditions within a pair remain
+sequential on one runner, while independent paired blocks run in parallel.
 
 ## Isolation of evidence and ground truth
 
@@ -106,9 +109,10 @@ after component scanning. The full standard PetClinic service stack and the
 owner-history code path remain unchanged. Every replacement is emitted as an
 `EMAC_AWS_DEMO_NEUTRALIZED` startup record, and no AWS data-plane API is called.
 
-## Reproducibility bundle
+## Reproducibility artifacts
 
-The uploaded `emac-petclinic-poc-*` artifact contains:
+The workflow publishes one build-provenance artifact, one artifact per pilot or
+confirmatory paired block, and one aggregate report. Together they contain:
 
 - resolved Compose configuration, upstream locks, image locks, dependency tree,
   and container inspection records;
@@ -120,7 +124,7 @@ The uploaded `emac-petclinic-poc-*` artifact contains:
 - every condition and pair validity record, including invalid attempts;
 - the aggregate JSON/Markdown report and complete Compose logs.
 
-The manuscript should report all ten valid confirmatory condition-runs, raw
+The manuscript should report all forty valid confirmatory condition-runs, raw
 counts, median/range summaries, exact delta recovery, false control deltas, held-
 out absolute errors, target-side errors, and local-SLI balance. It should not use
 statistical-significance language for this PoC.

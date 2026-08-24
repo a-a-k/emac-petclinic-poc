@@ -5,19 +5,20 @@ on:
 
 permissions:
   contents: read
+  packages: write
 
 concurrency:
   group: emac-petclinic-confirmatory
   cancel-in-progress: false
 
 jobs:
-  experiment:
-    name: 1 pilot + 5 paired confirmatory blocks
+  image-build:
+    name: Build and freeze the shared image set
     runs-on: ubuntu-24.04
-    timeout-minutes: 330
+    timeout-minutes: 35
     env:
-      ARTIFACT_ROOT: artifacts/github-${{ github.run_id }}-${{ github.run_attempt }}
-      PYTHONUNBUFFERED: "1"
+      COMPOSE_ENV: experiment/ci-images.env
+      BUILD_ARTIFACT: artifacts/build-inputs
     steps:
       - name: Check out EmaC artifact
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -36,26 +37,48 @@ jobs:
       - name: Validate adapters and fixed declarations
         run: python3 -m unittest discover -s experiment/tests -v
 
-      - name: Resolve Compose and pull pinned observability images
+      - name: Resolve commit-pinned image coordinates
         shell: bash
         run: |
           set -euo pipefail
-          docker compose --env-file experiment/images.lock.env config --quiet
-          docker compose --env-file experiment/images.lock.env pull --ignore-buildable
+          cp experiment/images.lock.env "$COMPOSE_ENV"
+          echo "APP_IMAGE_PREFIX=ghcr.io/${GITHUB_REPOSITORY}" >> "$COMPOSE_ENV"
+          echo "APP_IMAGE_TAG=${GITHUB_SHA}" >> "$COMPOSE_ENV"
+          docker compose --env-file "$COMPOSE_ENV" config --quiet
 
-      - name: Build the full PetClinic stack once
-        shell: bash
-        run: |
-          set -euo pipefail
-          docker compose --env-file experiment/images.lock.env build --parallel
+      - name: Authenticate to GitHub Container Registry
+        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f1c3b
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Capture the pinned gateway dependency tree
+      - name: Pull pinned third-party images
+        run: docker compose --env-file "$COMPOSE_ENV" pull --ignore-buildable --quiet
+
+      - name: Build the full PetClinic image set once
+        shell: bash
+        run: >-
+          docker compose --env-file "$COMPOSE_ENV" build --parallel
+          config-server discovery-server customers-service visits-service
+          vets-service admin-server gateway-a router
+
+      - name: Push the immutable commit-tagged image set to GHCR
+        shell: bash
+        run: >-
+          docker compose --env-file "$COMPOSE_ENV" push
+          config-server discovery-server customers-service visits-service
+          vets-service admin-server gateway-a router
+
+      - name: Capture build provenance and gateway dependency tree
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p "$ARTIFACT_ROOT/inputs"
+          mkdir -p "$BUILD_ARTIFACT"
+          cp experiment/upstream.lock experiment/images.lock.env "$COMPOSE_ENV" "$BUILD_ARTIFACT/"
+          docker compose --env-file "$COMPOSE_ENV" config > "$BUILD_ARTIFACT/compose.resolved.yml"
           set -a
-          source experiment/images.lock.env
+          source "$COMPOSE_ENV"
           set +a
           docker build \
             --target build \
@@ -65,35 +88,130 @@ jobs:
             -t emac-petclinic-build:ci .
           docker run --rm emac-petclinic-build:ci \
             mvn --batch-mode -pl spring-petclinic-api-gateway dependency:tree \
-            > "$ARTIFACT_ROOT/inputs/gateway-dependency-tree.txt"
+            > "$BUILD_ARTIFACT/gateway-dependency-tree.txt"
+          docker images --digests --no-trunc > "$BUILD_ARTIFACT/docker-images.txt"
 
-      - name: Execute pilot and confirmatory protocol
+      - name: Publish build provenance
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08
+        with:
+          name: emac-build-inputs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/build-inputs/
+          retention-days: 90
+
+  pilot:
+    name: Pilot paired block
+    needs: image-build
+    uses: ./.github/workflows/paired-block.yml
+    with:
+      phase: pilot
+      pair_ordinal: 1
+      seed_base: 824026
+      image_tag: ${{ github.sha }}
+      artifact_label: pilot-01
+      enforce_validity: true
+    secrets: inherit
+
+  confirmatory:
+    name: Confirmatory pair ${{ matrix.pair }}
+    needs: pilot
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix:
+        pair: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+    uses: ./.github/workflows/paired-block.yml
+    with:
+      phase: confirmatory
+      pair_ordinal: ${{ matrix.pair }}
+      seed_base: 834026
+      image_tag: ${{ github.sha }}
+      artifact_label: confirmatory-${{ matrix.pair }}
+      enforce_validity: false
+    secrets: inherit
+
+  assess-primary:
+    name: Plan bounded replacements
+    if: always() && needs.pilot.result == 'success'
+    needs: [pilot, confirmatory]
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      valid_primary: ${{ steps.plan.outputs.valid_primary }}
+    steps:
+      - name: Check out aggregation code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Download all primary pair artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: emac-confirmatory-*-${{ github.run_id }}-${{ github.run_attempt }}
+          path: collected-primary
+          merge-multiple: true
+
+      - name: Emit at most two replacement jobs
+        id: plan
         run: >-
-          python3 experiment/scripts/run_experiment.py
-          --output "$ARTIFACT_ROOT/run"
-          --pilot-pairs 1
-          --confirmatory-pairs 5
-          --max-replacement-pairs 2
-          --seed 824026
+          python3 experiment/scripts/plan_replacements.py
+          --input collected-primary
+          --required 20
+          --maximum 2
+          --github-output "$GITHUB_OUTPUT"
 
-      - name: Capture complete Compose logs
-        if: always()
-        shell: bash
-        run: |
-          mkdir -p "$ARTIFACT_ROOT"
-          docker compose --env-file experiment/images.lock.env ps --all --no-trunc > "$ARTIFACT_ROOT/compose-ps.txt" 2>&1 || true
-          docker compose --env-file experiment/images.lock.env logs --no-color --timestamps > "$ARTIFACT_ROOT/compose.log" 2>&1 || true
+  replacement:
+    name: Replacement pair ${{ matrix.ordinal }}
+    needs: assess-primary
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix: ${{ fromJSON(needs.assess-primary.outputs.matrix) }}
+    uses: ./.github/workflows/paired-block.yml
+    with:
+      phase: confirmatory
+      pair_ordinal: ${{ matrix.ordinal }}
+      seed_base: 834026
+      image_tag: ${{ github.sha }}
+      artifact_label: replacement-${{ matrix.ordinal }}
+      enabled: ${{ matrix.run }}
+      enforce_validity: false
+    secrets: inherit
 
-      - name: Tear down the ephemeral CI stack
-        if: always()
-        run: docker compose --env-file experiment/images.lock.env down --volumes --remove-orphans || true
+  aggregate:
+    name: Aggregate 20 retained paired blocks
+    if: always() && needs.pilot.result == 'success'
+    needs: [image-build, pilot, confirmatory, assess-primary, replacement]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out aggregation code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
 
-      - name: Publish reproducibility bundle
+      - name: Download primary pair artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: emac-confirmatory-*-${{ github.run_id }}-${{ github.run_attempt }}
+          path: collected
+          merge-multiple: true
+
+      - name: Download replacement pair artifacts, if any
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: emac-replacement-*-${{ github.run_id }}-${{ github.run_attempt }}
+          path: collected
+          merge-multiple: true
+
+      - name: Build the aggregate report
+        run: >-
+          python3 experiment/scripts/aggregate_pairs.py
+          --input collected
+          --output aggregate
+          --required 20
+
+      - name: Publish aggregate report
         if: always()
         uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08
         with:
-          name: emac-petclinic-poc-${{ github.run_id }}-${{ github.run_attempt }}
-          path: artifacts/
+          name: emac-aggregate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: aggregate/
           if-no-files-found: error
           retention-days: 90
-          compression-level: 1
