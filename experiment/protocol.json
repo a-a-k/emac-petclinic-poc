@@ -51,8 +51,8 @@
       "ratePerSecond": 25
     },
     "confirmatory": {
-      "evidenceRequests": 10000,
-      "outcomeRequests": 10000,
+      "evidenceRequests": 6000,
+      "outcomeRequests": 6000,
       "ratePerSecond": 50
     },
     "loadWorkers": 64,
@@ -61,6 +61,7 @@
     "traceSampling": 1.0,
     "traceQueryLimitPadding": 100,
     "traceQueryTimeoutSeconds": 300,
+    "traceQueryChunkSeconds": 10,
     "drainSeconds": 3,
     "collectorFlushSeconds": 5,
     "breakerOpenBudgetSeconds": 21600,

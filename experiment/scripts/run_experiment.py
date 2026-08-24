@@ -435,6 +435,7 @@ def collect_window_traces(
         limit=requests + int(protocol["measurement"]["traceQueryLimitPadding"]),
         contract=contract,
         timeout=int(protocol["measurement"]["traceQueryTimeoutSeconds"]),
+        chunk_seconds=int(protocol["measurement"]["traceQueryChunkSeconds"]),
     )
     progress(
         "trace-query-complete",
@@ -442,6 +443,7 @@ def collect_window_traces(
         traces=result["normalizedJourneyTraces"],
         query_seconds=f"{result['timing']['querySeconds']:.3f}",
         raw_bytes=result["timing"]["rawBytes"],
+        chunks=result["timing"]["chunkCount"],
     )
     return result
 

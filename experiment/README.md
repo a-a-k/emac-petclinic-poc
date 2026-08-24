@@ -109,9 +109,12 @@ step timeout.
 
 A pilot uses 200 balanced bootstrap requests plus 2,000 evidence and 2,000
 outcome requests per condition at 25 requests/s. A confirmatory pair uses the
-same bootstrap and 10,000 evidence/outcome requests per condition at 50
+same bootstrap and 6,000 evidence/outcome requests per condition at 50
 requests/s. Load submission is bounded to 128 in-flight requests, and reports
 achieved throughput and latency percentiles rather than only scheduled rate.
+Jaeger evidence is queried in ten-second time chunks; every raw response is
+immediately written as a separate gzip artifact before its decoded tree is
+released, bounding peak collector memory independently of window size.
 
 The default workflow dispatch runs only the pilot. Twenty confirmatory pairs are
 enabled by an explicit boolean dispatch input and start only after that dispatch's
@@ -123,7 +126,7 @@ pairs, up to two replacements.
 Each condition publishes:
 
 - direct boundary metric snapshots with opaque identity tags;
-- raw compressed Jaeger response and generic normalized edge graph;
+- raw compressed Jaeger response chunks and generic normalized edge graph;
 - status-only evidence load summary without logical routing identity;
 - bootstrap model, typed delta, effective model, and compiled estimate;
 - the hand-maintained dynamic-composite baseline;

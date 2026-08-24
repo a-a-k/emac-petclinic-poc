@@ -170,69 +170,124 @@ def collect(
     limit: int,
     contract: dict[str, object],
     timeout: int = 300,
+    chunk_seconds: int = 10,
 ) -> dict[str, object]:
-    raw, raw_bytes, query_seconds = query_jaeger(
-        base_url,
-        str(contract["entrypoint"]["serviceName"]),
-        start_us,
-        end_us,
-        limit,
-        timeout,
-    )
-    normalize_started = time.monotonic()
-    normalized = [
-        row for trace in raw.get("data", []) if (row := normalize_trace(trace, contract))
-    ]
+    if chunk_seconds <= 0:
+        raise ValueError("chunk_seconds must be positive")
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    raw_dir = output_dir / "traces.raw.chunks"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+
     by_instance: dict[str, dict[str, object]] = {}
-    for row in normalized:
-        aggregate = by_instance.setdefault(
-            str(row["entryInstance"]), {"journeyTraces": 0, "edges": {}}
+    normalized_count = 0
+    returned_raw_traces = 0
+    total_query_seconds = 0.0
+    total_normalize_seconds = 0.0
+    total_write_seconds = 0.0
+    total_raw_bytes = 0
+    max_chunk_raw_bytes = 0
+    query_chunks: list[dict[str, object]] = []
+    seen_trace_ids: set[str] = set()
+
+    chunk_us = chunk_seconds * 1_000_000
+    cursor = start_us
+    chunk_index = 0
+    while cursor <= end_us:
+        chunk_index += 1
+        chunk_end = min(end_us, cursor + chunk_us - 1)
+        raw, raw_bytes, query_seconds = query_jaeger(
+            base_url,
+            str(contract["entrypoint"]["serviceName"]),
+            cursor,
+            chunk_end,
+            limit,
+            timeout,
         )
-        aggregate["journeyTraces"] += 1
-        for edge in row["edges"]:
-            edge_aggregate = aggregate["edges"].setdefault(
-                edge["edgeId"],
-                {
-                    "edgeId": edge["edgeId"],
-                    "sourceService": edge["sourceService"],
-                    "targetService": edge["targetService"],
-                    "executions": 0,
-                    "operations": set(),
-                },
+        raw_trace_count = len(raw.get("data", []))
+        returned_raw_traces += raw_trace_count
+        total_query_seconds += query_seconds
+        total_raw_bytes += len(raw_bytes)
+        max_chunk_raw_bytes = max(max_chunk_raw_bytes, len(raw_bytes))
+
+        write_started = time.monotonic()
+        raw_name = f"{chunk_index:04d}.json.gz"
+        with gzip.open(raw_dir / raw_name, "wb", compresslevel=1) as handle:
+            handle.write(raw_bytes)
+        total_write_seconds += time.monotonic() - write_started
+
+        normalize_started = time.monotonic()
+        chunk_normalized = 0
+        for trace in raw.get("data", []):
+            trace_id = str(trace.get("traceID", ""))
+            if trace_id and trace_id in seen_trace_ids:
+                continue
+            if trace_id:
+                seen_trace_ids.add(trace_id)
+            row = normalize_trace(trace, contract)
+            if row is None:
+                continue
+            chunk_normalized += 1
+            normalized_count += 1
+            aggregate = by_instance.setdefault(
+                str(row["entryInstance"]), {"journeyTraces": 0, "edges": {}}
             )
-            edge_aggregate["executions"] += 1
-            edge_aggregate["operations"].update(edge["operations"])
+            aggregate["journeyTraces"] += 1
+            for edge in row["edges"]:
+                edge_aggregate = aggregate["edges"].setdefault(
+                    edge["edgeId"],
+                    {
+                        "edgeId": edge["edgeId"],
+                        "sourceService": edge["sourceService"],
+                        "targetService": edge["targetService"],
+                        "executions": 0,
+                        "operations": set(),
+                    },
+                )
+                edge_aggregate["executions"] += 1
+                edge_aggregate["operations"].update(edge["operations"])
+        total_normalize_seconds += time.monotonic() - normalize_started
+        query_chunks.append(
+            {
+                "index": chunk_index,
+                "startUs": cursor,
+                "endUs": chunk_end,
+                "rawFile": f"traces.raw.chunks/{raw_name}",
+                "returnedRawTraces": raw_trace_count,
+                "normalizedJourneyTraces": chunk_normalized,
+                "querySeconds": query_seconds,
+                "rawBytes": len(raw_bytes),
+            }
+        )
+        cursor = chunk_end + 1
 
     for aggregate in by_instance.values():
         aggregate["edges"] = {
             edge_id: {**edge, "operations": sorted(edge["operations"])}
             for edge_id, edge in sorted(aggregate["edges"].items())
         }
-    normalize_seconds = time.monotonic() - normalize_started
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    write_started = time.monotonic()
-    with gzip.open(output_dir / "traces.raw.json.gz", "wb", compresslevel=1) as handle:
-        handle.write(raw_bytes)
-    write_seconds = time.monotonic() - write_started
     result = {
-        "schemaVersion": "emac.discovered-trace-graph/v2",
+        "schemaVersion": "emac.discovered-trace-graph/v3",
         "query": {
             "service": contract["entrypoint"]["serviceName"],
             "startUs": start_us,
             "endUs": end_us,
             "limit": limit,
+            "chunkSeconds": chunk_seconds,
+            "chunks": query_chunks,
         },
         "timing": {
-            "querySeconds": query_seconds,
-            "normalizeSeconds": normalize_seconds,
-            "rawGzipWriteSeconds": write_seconds,
-            "rawBytes": len(raw_bytes),
+            "querySeconds": total_query_seconds,
+            "normalizeSeconds": total_normalize_seconds,
+            "rawGzipWriteSeconds": total_write_seconds,
+            "rawBytes": total_raw_bytes,
+            "maxChunkRawBytes": max_chunk_raw_bytes,
+            "chunkCount": chunk_index,
         },
-        "returnedRawTraces": len(raw.get("data", [])),
-        "normalizedJourneyTraces": len(normalized),
+        "returnedRawTraces": returned_raw_traces,
+        "normalizedJourneyTraces": normalized_count,
         "byInstance": by_instance,
-        "traces": normalized,
+        "perTraceRowsRetained": False,
     }
     (output_dir / "traces.normalized.json").write_text(
         json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8"
@@ -247,6 +302,7 @@ def main() -> None:
     parser.add_argument("--end-us", type=int, required=True)
     parser.add_argument("--limit", type=int, default=20000)
     parser.add_argument("--timeout", type=int, default=300)
+    parser.add_argument("--chunk-seconds", type=int, default=10)
     parser.add_argument("--contract", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     args = parser.parse_args()
@@ -259,6 +315,7 @@ def main() -> None:
         args.limit,
         contract,
         args.timeout,
+        args.chunk_seconds,
     )
 
 

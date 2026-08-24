@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 EXPERIMENT = Path(__file__).resolve().parents[1]
@@ -12,7 +13,7 @@ SCRIPTS = EXPERIMENT / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
 from apply_model_delta import apply_delta  # noqa: E402
-from collect_trace_evidence import normalize_trace  # noqa: E402
+from collect_trace_evidence import collect, normalize_trace  # noqa: E402
 from compile_journeys import compile_estimates  # noqa: E402
 from discover_model import discover_bootstrap, discover_delta  # noqa: E402
 from evidence import (  # noqa: E402
@@ -194,6 +195,58 @@ class DiscoveryTests(unittest.TestCase):
             [edge["targetService"] for edge in normalized["edges"]],
             ["downstream-alpha", "downstream-beta"],
         )
+
+    @patch("collect_trace_evidence.query_jaeger")
+    def test_trace_collection_is_chunked_and_deduplicates_boundaries(self, query) -> None:
+        trace = {
+            "traceID": "boundary-trace",
+            "processes": {
+                "p0": {
+                    "serviceName": "api-gateway",
+                    "tags": [{"key": "service.instance.id", "value": INSTANCE_ONE}],
+                }
+            },
+            "spans": [
+                {
+                    "spanID": "root",
+                    "processID": "p0",
+                    "operationName": "GET /api/gateway/owners/{ownerId}",
+                    "tags": [],
+                    "references": [],
+                }
+            ],
+        }
+        payload = {"data": [trace]}
+        raw = json.dumps(payload).encode("utf-8")
+        query.side_effect = [
+            (payload, raw, 0.1),
+            (payload, raw, 0.1),
+            ({"data": []}, b'{"data":[]}', 0.1),
+        ]
+        with tempfile.TemporaryDirectory() as temporary:
+            result = collect(
+                "http://unused",
+                0,
+                20_000_000,
+                Path(temporary),
+                100,
+                self.contract,
+                timeout=1,
+                chunk_seconds=10,
+            )
+            self.assertEqual(query.call_count, 3)
+            self.assertEqual(
+                [(call.args[2], call.args[3]) for call in query.call_args_list],
+                [
+                    (0, 9_999_999),
+                    (10_000_000, 19_999_999),
+                    (20_000_000, 20_000_000),
+                ],
+            )
+            self.assertEqual(result["returnedRawTraces"], 2)
+            self.assertEqual(result["normalizedJourneyTraces"], 1)
+            self.assertEqual(result["timing"]["chunkCount"], 3)
+            self.assertEqual(len(list((Path(temporary) / "traces.raw.chunks").glob("*.gz"))), 3)
 
     def test_complete_delta_apply_compile_pipeline(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
