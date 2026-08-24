@@ -8,7 +8,12 @@ x-petclinic-build: &petclinic-build
     JAVA_IMAGE: ${JAVA_IMAGE}
 
 x-otel-env: &otel-env
-  JAVA_TOOL_OPTIONS: -javaagent:/otel/opentelemetry-javaagent.jar
+  JAVA_TOOL_OPTIONS: >-
+    -javaagent:/otel/opentelemetry-javaagent.jar
+    -Daws.endpointUrl.dynamodb=http://localstack:4566
+    -Daws.endpointUrl.sqs=http://localstack:4566
+    -Daws.endpointUrl.kinesis=http://localstack:4566
+    -Daws.endpointUrl.s3=http://localstack:4566
   OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
   OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
   OTEL_METRICS_EXPORTER: none
@@ -26,6 +31,10 @@ x-app-env: &app-env
   REGION_FROM_ECS: us-east-1
   AWS_EC2_METADATA_DISABLED: "true"
   AWS_ENDPOINT_URL: http://localstack:4566
+  AWS_ENDPOINT_URL_DYNAMODB: http://localstack:4566
+  AWS_ENDPOINT_URL_SQS: http://localstack:4566
+  AWS_ENDPOINT_URL_KINESIS: http://localstack:4566
+  AWS_ENDPOINT_URL_S3: http://localstack:4566
 
 x-app-health: &app-health
   interval: 5s
