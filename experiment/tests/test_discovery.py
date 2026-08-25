@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import sys
 import tempfile
 import unittest
@@ -16,6 +17,7 @@ from apply_model_delta import apply_delta  # noqa: E402
 from collect_trace_evidence import collect, normalize_trace  # noqa: E402
 from compile_journeys import compile_estimates  # noqa: E402
 from discover_model import discover_bootstrap, discover_delta  # noqa: E402
+from evidence_ablations import evaluate as evaluate_ablations  # noqa: E402
 from evidence import (  # noqa: E402
     adapter_operator_counts,
     adapter_operator_state,
@@ -25,6 +27,7 @@ from evidence import (  # noqa: E402
     parse_prometheus,
 )
 from manual_composite import evaluate as manual_evaluate  # noqa: E402
+from run_experiment import run_discovery_pipeline  # noqa: E402
 
 
 INSTANCE_ONE = "instance-18f8d5aa87d20816"
@@ -105,6 +108,46 @@ def write_evidence(
     (root / "load-summary.json").write_text(
         json.dumps({"completed": completed}), encoding="utf-8"
     )
+
+
+def write_ablation_inputs(
+    root: Path, base: dict[str, object], evidence_dir: Path
+) -> tuple[Path, Path, Path, Path]:
+    metric_base = root / "metrics-only" / "bootstrap-operators.json"
+    metric_evidence = root / "metrics-only" / "evidence"
+    trace_base = root / "traces-only" / "bootstrap-interactions.json"
+    trace_evidence = root / "traces-only" / "evidence"
+    metric_base.parent.mkdir(parents=True)
+    trace_base.parent.mkdir(parents=True)
+    metric_evidence.mkdir(parents=True)
+    trace_evidence.mkdir(parents=True)
+    metric_base.write_text(
+        json.dumps(
+            {
+                "schemaVersion": "emac.metrics-only-bootstrap-view/v1",
+                "modelVersion": base["modelVersion"],
+                "operators": base["operators"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    trace_base.write_text(
+        json.dumps(
+            {
+                "schemaVersion": "emac.traces-only-bootstrap-view/v1",
+                "modelVersion": base["modelVersion"],
+                "interactions": base["interactions"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    shutil.copytree(evidence_dir / "snapshots", metric_evidence / "snapshots")
+    shutil.copy2(evidence_dir / "load-summary.json", metric_evidence / "load-summary.json")
+    shutil.copy2(
+        evidence_dir / "traces.normalized.json",
+        trace_evidence / "traces.normalized.json",
+    )
+    return metric_base, metric_evidence, trace_base, trace_evidence
 
 
 class DiscoveryTests(unittest.TestCase):
@@ -283,6 +326,35 @@ class DiscoveryTests(unittest.TestCase):
             )
             self.assertAlmostEqual(delta["runtimeParameters"]["q"], 0.99)
 
+            delta_path = root / "typed-delta.json"
+            delta_path.write_text(json.dumps(delta), encoding="utf-8")
+            ablation_inputs = write_ablation_inputs(root / "ablations", base, evidence_dir)
+            ablations = evaluate_ablations(
+                *ablation_inputs, self.adapters_path, delta_path, 0.01
+            )
+            self.assertTrue(ablations["sourceIsolation"]["verified"])
+            self.assertEqual(ablations["metricsOnly"]["stateChanges"][0]["after"], "OPEN")
+            self.assertAlmostEqual(
+                ablations["metricsOnly"]["runtimeParameters"]["q"], 0.99
+            )
+            self.assertEqual(ablations["metricsOnly"]["edgeBinding"]["status"], "unresolved")
+            self.assertEqual(ablations["tracesOnly"]["suppression"]["status"], "identified")
+            self.assertEqual(
+                ablations["tracesOnly"]["suppression"]["affectedEdge"]["targetService"],
+                "visits-service",
+            )
+            self.assertEqual(ablations["tracesOnly"]["operator"]["status"], "unresolved")
+            self.assertEqual(ablations["fullFusion"]["status"], "typed-delta")
+            self.assertEqual(
+                ablations["negativeAmbiguityReplay"]["status"], "binding-refused"
+            )
+            self.assertEqual(
+                len(ablations["negativeAmbiguityReplay"]["matchingEdgeCandidates"]), 2
+            )
+            self.assertEqual(
+                ablations["negativeAmbiguityReplay"]["emittedBindings"], []
+            )
+
             effective = apply_delta(base, delta)
             compiled = compile_estimates(effective, self.contract)
             self.assertAlmostEqual(
@@ -298,6 +370,15 @@ class DiscoveryTests(unittest.TestCase):
                 self.adapters_path,
             )
             self.assertAlmostEqual(manual["estimates"]["owner-history"], 0.99)
+
+            protocol = json.loads(
+                (EXPERIMENT / "protocol.json").read_text(encoding="utf-8")
+            )
+            orchestrated = run_discovery_pipeline(
+                root / "orchestrated", evidence_dir, base_path, protocol
+            )
+            self.assertEqual(orchestrated[4]["fullFusion"]["status"], "typed-delta")
+            self.assertTrue(orchestrated[4]["sourceIsolation"]["verified"])
 
     def test_control_produces_no_state_delta_or_edge_binding(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -328,6 +409,20 @@ class DiscoveryTests(unittest.TestCase):
             delta = discover_delta(base_path, evidence_dir, self.adapters_path, 0.01)
             self.assertEqual(delta["stateChanges"], [])
             self.assertEqual(delta["bindings"], [])
+            delta_path = root / "control-delta.json"
+            delta_path.write_text(json.dumps(delta), encoding="utf-8")
+            ablation_inputs = write_ablation_inputs(
+                root / "control-ablations", base, evidence_dir
+            )
+            ablations = evaluate_ablations(
+                *ablation_inputs, self.adapters_path, delta_path, 0.01
+            )
+            self.assertEqual(ablations["metricsOnly"]["stateChanges"], [])
+            self.assertEqual(ablations["tracesOnly"]["suppression"]["status"], "no-drift")
+            self.assertEqual(ablations["fullFusion"]["status"], "no-drift")
+            self.assertEqual(
+                ablations["negativeAmbiguityReplay"]["status"], "not-applicable"
+            )
             compiled = compile_estimates(apply_delta(base, delta), self.contract)
             self.assertEqual(
                 compiled["estimates"]["owner-history"]["modelDiscoveredEstimate"], 1.0
@@ -374,6 +469,7 @@ class DiscoveryTests(unittest.TestCase):
             "apply_model_delta.py",
             "compile_journeys.py",
             "collect_trace_evidence.py",
+            "evidence_ablations.py",
         ):
             text = (SCRIPTS / filename).read_text(encoding="utf-8")
             for token in forbidden:

@@ -14,7 +14,13 @@ def pair(ordinal: int, valid: bool) -> dict[str, object]:
     control = {
         "condition": "control",
         "discovery": {"stateChanges": [], "operatorBindings": []},
-        "validity": {"checks": {}},
+        "validity": {
+            "checks": {
+                "metricsOnlyNoFalseStateDelta": True,
+                "tracesOnlyNoFalseSuppression": True,
+                "fullFusionNoFalseDelta": True,
+            }
+        },
         "comparison": {
             "owner-history": {
                 "modelDiscoveredAbsoluteError": 0.0,
@@ -32,6 +38,10 @@ def pair(ordinal: int, valid: bool) -> dict[str, object]:
             "checks": {
                 "exactStateDeltaRecovery": True,
                 "uniqueOperatorEdgeBindingRecovery": True,
+                "metricsOnlyStateRecovery": True,
+                "tracesOnlyEdgeRecovery": True,
+                "fullFusionTypedRecovery": True,
+                "ambiguityReplayRefusesBinding": True,
             }
         },
     }
@@ -51,6 +61,12 @@ class MatrixAggregationTests(unittest.TestCase):
             ["confirmatory-pair-01", "confirmatory-pair-21"],
         )
         self.assertEqual(report["invalidAttemptsRetained"], 1)
+        self.assertEqual(
+            report["evidenceSourceAblations"]["treatments"][
+                "ambiguityReplayRefusesBinding"
+            ],
+            {"numerator": 2, "denominator": 2},
+        )
 
     def test_replacements_are_bounded_and_zero_uses_noop_matrix(self) -> None:
         self.assertEqual(

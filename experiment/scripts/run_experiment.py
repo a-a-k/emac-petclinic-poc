@@ -619,12 +619,25 @@ def run_discovery_pipeline(
     evidence_dir: Path,
     bootstrap_model_path: Path,
     protocol: dict[str, object],
-) -> tuple[dict[str, object], dict[str, object], dict[str, object], dict[str, object], int]:
+) -> tuple[
+    dict[str, object],
+    dict[str, object],
+    dict[str, object],
+    dict[str, object],
+    dict[str, object],
+    int,
+]:
     model_dir = condition_dir / "model"
     delta_path = model_dir / "typed-delta.json"
     effective_path = model_dir / "effective-model.json"
     compiled_path = model_dir / "compiled-estimates.json"
     manual_path = condition_dir / "baselines" / "manual-dynamic-composite.json"
+    ablation_dir = condition_dir / "ablations"
+    ablation_path = ablation_dir / "evidence-source-ablation.json"
+    metric_base_path = ablation_dir / "inputs" / "metrics-only" / "bootstrap-operators.json"
+    metric_evidence_dir = ablation_dir / "inputs" / "metrics-only" / "evidence"
+    trace_base_path = ablation_dir / "inputs" / "traces-only" / "bootstrap-interactions.json"
+    trace_evidence_dir = ablation_dir / "inputs" / "traces-only" / "evidence"
     tolerance = str(protocol["measurement"]["operatorEdgeBindingToleranceFraction"])
 
     run_script(
@@ -672,10 +685,59 @@ def run_discovery_pipeline(
         "--output",
         str(manual_path),
     )
+    bootstrap_model = read_json(bootstrap_model_path)
+    write_json(
+        metric_base_path,
+        {
+            "schemaVersion": "emac.metrics-only-bootstrap-view/v1",
+            "modelVersion": bootstrap_model["modelVersion"],
+            "operators": bootstrap_model["operators"],
+        },
+    )
+    metric_evidence_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(
+        evidence_dir / "snapshots",
+        metric_evidence_dir / "snapshots",
+        dirs_exist_ok=True,
+    )
+    shutil.copy2(evidence_dir / "load-summary.json", metric_evidence_dir / "load-summary.json")
+    write_json(
+        trace_base_path,
+        {
+            "schemaVersion": "emac.traces-only-bootstrap-view/v1",
+            "modelVersion": bootstrap_model["modelVersion"],
+            "interactions": bootstrap_model["interactions"],
+        },
+    )
+    trace_evidence_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(
+        evidence_dir / "traces.normalized.json",
+        trace_evidence_dir / "traces.normalized.json",
+    )
+    run_script(
+        "evidence_ablations.py",
+        "--metric-base",
+        str(metric_base_path),
+        "--metric-evidence",
+        str(metric_evidence_dir),
+        "--trace-base",
+        str(trace_base_path),
+        "--trace-evidence",
+        str(trace_evidence_dir),
+        "--adapters",
+        str(ADAPTERS_PATH),
+        "--full-delta",
+        str(delta_path),
+        "--tolerance-fraction",
+        tolerance,
+        "--output",
+        str(ablation_path),
+    )
     delta = read_json(delta_path)
     effective = read_json(effective_path)
     compiled = read_json(compiled_path)
     manual = read_json(manual_path)
+    ablations = read_json(ablation_path)
     freeze_ns = time.time_ns()
     freeze = {
         "schemaVersion": "emac.pre-outcome-freeze/v2",
@@ -683,6 +745,7 @@ def run_discovery_pipeline(
         "deltaVersion": delta["deltaVersion"],
         "effectiveModelVersion": effective["modelVersion"],
         "compilationVersion": compiled["compilationVersion"],
+        "ablationReportVersion": ablations["reportVersion"],
         "frozenAtUnixNs": freeze_ns,
     }
     freeze_path = model_dir / "pre-outcome-freeze.json"
@@ -692,7 +755,7 @@ def run_discovery_pipeline(
         effective_model=effective["modelVersion"],
         compilation=compiled["compilationVersion"],
     )
-    return delta, effective, compiled, manual, freeze_ns
+    return delta, effective, compiled, manual, ablations, freeze_ns
 
 
 def local_slis(evidence_dir: Path, load: dict[str, object]) -> dict[str, object]:
@@ -731,6 +794,7 @@ def condition_validity(
     delta: dict[str, object],
     effective: dict[str, object],
     compiled: dict[str, object],
+    ablations: dict[str, object],
     freeze_ns: int,
     outcome_started_ns: int,
     elapsed_open_seconds: float,
@@ -788,6 +852,10 @@ def condition_validity(
         and effective["appliedDeltaVersion"] == delta["deltaVersion"]
         and compiled["effectiveModelVersion"] == effective["modelVersion"]
     )
+    metrics_only = ablations["metricsOnly"]
+    traces_only = ablations["tracesOnly"]
+    full_fusion = ablations["fullFusion"]
+    negative = ablations["negativeAmbiguityReplay"]
     checks = {
         "bootstrapFrozenBeforeManipulation": bootstrap_frozen_ns < manipulation_started_ns,
         "cleanGatewayResetAfterBootstrap": (
@@ -808,8 +876,25 @@ def condition_validity(
         "traceCoverageAtLeastMinimum": all(value >= minimum_coverage for value in trace_coverage.values()),
         "modelApplicationChain": chain_valid,
         "freezePrecedesOutcome": freeze_ns < outcome_started_ns,
+        "ablationSourcesAreSeparated": (
+            ablations["sourceIsolation"]["verified"] is True
+            and
+            metrics_only["inputPolicy"]["traceGraphRead"] is False
+            and traces_only["inputPolicy"]["metricSnapshotsRead"] is False
+        ),
+        "metricsOnlyLeavesEdgeUnresolved": metrics_only["edgeBinding"]["status"]
+        == "unresolved",
+        "tracesOnlyLeavesOperatorUnresolved": traces_only["operator"]["status"]
+        == "unresolved",
+        "fullFusionQMatchesCompiledModel": math.isclose(
+            float(full_fusion["q"]),
+            float(compiled["runtimeParametersFromEffectiveModel"]["q"]),
+            abs_tol=1e-12,
+        ),
     }
     if condition == "treatment":
+        metrics_state = metrics_only["stateChanges"]
+        trace_edge = traces_only["suppression"]["affectedEdge"]
         checks.update(
             {
                 "nominalTreatmentCounts": (
@@ -820,6 +905,30 @@ def condition_validity(
                 ),
                 "exactStateDeltaRecovery": treatment_delta,
                 "uniqueOperatorEdgeBindingRecovery": treatment_binding,
+                "metricsOnlyStateRecovery": (
+                    len(metrics_state) == 1
+                    and metrics_state[0]["serviceInstanceId"]
+                    == assignment["minorityInstanceId"]
+                    and metrics_state[0]["after"] == "OPEN"
+                    and math.isclose(
+                        float(metrics_only["runtimeParameters"]["q"]),
+                        float(delta["runtimeParameters"]["q"]),
+                        abs_tol=1e-12,
+                    )
+                ),
+                "tracesOnlyEdgeRecovery": (
+                    traces_only["suppression"]["status"] == "identified"
+                    and trace_edge is not None
+                    and trace_edge["serviceInstanceId"] == assignment["minorityInstanceId"]
+                    and trace_edge["sourceService"] == "api-gateway"
+                    and trace_edge["targetService"] == "visits-service"
+                ),
+                "fullFusionTypedRecovery": full_fusion["status"] == "typed-delta",
+                "ambiguityReplayRefusesBinding": (
+                    negative["status"] == "binding-refused"
+                    and len(negative["matchingEdgeCandidates"]) >= 2
+                    and not negative["emittedBindings"]
+                ),
             }
         )
     else:
@@ -831,6 +940,11 @@ def condition_validity(
                 ),
                 "noFalseStateDelta": not delta["stateChanges"],
                 "noFalseOperatorEdgeBinding": not delta["bindings"],
+                "metricsOnlyNoFalseStateDelta": not metrics_only["stateChanges"],
+                "tracesOnlyNoFalseSuppression": traces_only["suppression"]["status"]
+                == "no-drift",
+                "fullFusionNoFalseDelta": full_fusion["status"] == "no-drift",
+                "ambiguityReplayNotApplicable": negative["status"] == "not-applicable",
             }
         )
     return {"valid": all(checks.values()), "checks": checks, "traceCoverage": trace_coverage}
@@ -887,7 +1001,7 @@ def run_condition(
         evidence_dir, evidence_load, evidence_requests, protocol, contract, f"{run_id}-evidence"
     )
 
-    delta, effective, compiled, manual, freeze_ns = run_discovery_pipeline(
+    delta, effective, compiled, manual, ablations, freeze_ns = run_discovery_pipeline(
         condition_dir, evidence_dir, bootstrap_path, protocol
     )
     outcome_started_ns = time.time_ns()
@@ -933,6 +1047,7 @@ def run_condition(
         delta,
         effective,
         compiled,
+        ablations,
         freeze_ns,
         outcome_started_ns,
         elapsed_open,
@@ -954,6 +1069,7 @@ def run_condition(
             "runtimeParameters": delta["runtimeParameters"],
             "effectiveModelVersion": effective["modelVersion"],
         },
+        "ablations": ablations,
         "localAvailabilitySlis": slis,
     }
     write_json(condition_dir / "result.json", result)
@@ -1032,13 +1148,40 @@ def summarize(confirmatory: list[dict[str, object]], all_pairs: list[dict[str, o
         bool(row["discovery"]["stateChanges"] or row["discovery"]["operatorBindings"])
         for row in controls
     )
+    treatment_check_counts = {
+        name: sum(bool(row["validity"]["checks"].get(name, False)) for row in treatments)
+        for name in (
+            "metricsOnlyStateRecovery",
+            "tracesOnlyEdgeRecovery",
+            "fullFusionTypedRecovery",
+            "ambiguityReplayRefusesBinding",
+        )
+    }
+    control_check_counts = {
+        name: sum(bool(row["validity"]["checks"].get(name, False)) for row in controls)
+        for name in (
+            "metricsOnlyNoFalseStateDelta",
+            "tracesOnlyNoFalseSuppression",
+            "fullFusionNoFalseDelta",
+        )
+    }
     return {
-        "schemaVersion": "emac.discovery-report/v2",
+        "schemaVersion": "emac.discovery-report/v3",
         "attemptedPairs": len(all_pairs),
         "confirmatoryPairsRetained": len(valid_confirmatory),
         "invalidAttemptsRetained": len([pair for pair in all_pairs if not pair["valid"]]),
         "exactTreatmentModelRecovery": {"numerator": exact_treatment, "denominator": len(treatments)},
         "falseDiscoveryInControls": {"numerator": false_control, "denominator": len(controls)},
+        "evidenceSourceAblations": {
+            "treatments": {
+                name: {"numerator": count, "denominator": len(treatments)}
+                for name, count in treatment_check_counts.items()
+            },
+            "controls": {
+                name: {"numerator": count, "denominator": len(controls)}
+                for name, count in control_check_counts.items()
+            },
+        },
         "ownerHistoryErrors": {
             name: [row["comparison"]["owner-history"][key] for row in treatments + controls]
             for name, key in (
@@ -1056,6 +1199,7 @@ def summarize(confirmatory: list[dict[str, object]], all_pairs: list[dict[str, o
 def write_markdown(path: Path, report: dict[str, object]) -> None:
     recovery = report["exactTreatmentModelRecovery"]
     false = report["falseDiscoveryInControls"]
+    ablations = report["evidenceSourceAblations"]["treatments"]
     lines = [
         "# EmaC runtime-model discovery PoC",
         "",
@@ -1063,6 +1207,21 @@ def write_markdown(path: Path, report: dict[str, object]) -> None:
         f"- Exact treatment model recovery: {recovery['numerator']}/{recovery['denominator']}",
         f"- False discovery in controls: {false['numerator']}/{false['denominator']}",
         f"- Frozen target-side errors in treatments: {report['frozenTargetSideErrorsInTreatments']}",
+        (
+            "- Metrics-only state recovery (edge unresolved): "
+            f"{ablations['metricsOnlyStateRecovery']['numerator']}/"
+            f"{ablations['metricsOnlyStateRecovery']['denominator']}"
+        ),
+        (
+            "- Traces-only edge recovery (operator unresolved): "
+            f"{ablations['tracesOnlyEdgeRecovery']['numerator']}/"
+            f"{ablations['tracesOnlyEdgeRecovery']['denominator']}"
+        ),
+        (
+            "- Ambiguous binding correctly refused: "
+            f"{ablations['ambiguityReplayRefusesBinding']['numerator']}/"
+            f"{ablations['ambiguityReplayRefusesBinding']['denominator']}"
+        ),
     ]
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 

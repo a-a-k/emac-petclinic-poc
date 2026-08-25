@@ -63,7 +63,9 @@ The bootstrap trace graph identifies normally executed outgoing edges per opaque
 gateway instance. The runtime adapter enumerates operator names and states from
 standard metric labels. For an instance with rejected calls, EmaC considers
 bootstrap edges that previously executed on at least 95% of its journey traces.
-It binds the operator only if exactly one edge satisfies:
+For every such baseline edge it computes the executions missing from the
+post-preconditioning evidence graph on the same opaque instance. It binds the
+operator only if exactly one edge satisfies:
 
 ```text
 missing runtime edge executions ~= not-permitted calls
@@ -71,6 +73,36 @@ missing runtime edge executions ~= not-permitted calls
 
 within the predeclared one-percent tolerance. Ambiguous or absent bindings make
 the treatment invalid; EmaC does not select the most convenient candidate.
+
+For example, if bootstrap contains 100/100 Customers and 100/100 Visits edge
+executions on an instance, while treatment evidence contains 60/60 Customers,
+0/60 Visits, and 60 metric `not-permitted` decisions, only the Visits edge has
+`missing executions = not-permitted = 60`.
+
+## Evidence-source ablations and negative control
+
+Every condition also executes source-isolated analyses before the held-out
+outcome window:
+
+- metrics-only reads counter/state snapshots but never the trace graph; it may
+  recover operator identity, state, and `q`, while the affected edge must remain
+  unresolved;
+- traces-only reads the bootstrap/current trace graphs but never metric
+  snapshots; it may recover a uniquely suppressed edge, while operator identity
+  and state must remain unresolved;
+- full fusion reads both and must produce the typed operator-to-edge delta.
+
+The workflow materializes separate input views: the metrics-only directory has
+operator snapshots and the experiment-scoped eligible-request count but no
+trace graph, while the traces-only directory has bootstrap/current interaction
+graphs but no metric snapshots or operator model. Their manifests and contents
+are retained as artifacts.
+
+For each treatment, an artifact-level counterfactual replay changes the observed
+trace graph so that two normally executed bootstrap edges have the same missing
+execution count as the real `not-permitted` count. The unchanged production
+binding algorithm is rerun and must emit no binding. This is a deliberately
+ambiguous negative control, not an additional live fault condition.
 
 ## Reliability compilation
 
@@ -129,6 +161,7 @@ Each condition publishes:
 - raw compressed Jaeger response chunks and generic normalized edge graph;
 - status-only evidence load summary without logical routing identity;
 - bootstrap model, typed delta, effective model, and compiled estimate;
+- metrics-only, traces-only, full-fusion, and ambiguity-replay reports;
 - the hand-maintained dynamic-composite baseline;
 - hidden runtime assignment, manipulation and routing records;
 - held-out per-request semantic decisions and outcome summary;
