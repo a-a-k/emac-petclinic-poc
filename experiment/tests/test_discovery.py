@@ -16,7 +16,7 @@ sys.path.insert(0, str(SCRIPTS))
 from apply_model_delta import apply_delta  # noqa: E402
 from collect_trace_evidence import collect, normalize_trace  # noqa: E402
 from compile_journeys import compile_estimates  # noqa: E402
-from discover_model import discover_bootstrap, discover_delta  # noqa: E402
+from discover_model import discover_bootstrap, discover_delta, trace_graph  # noqa: E402
 from evidence_ablations import evaluate as evaluate_ablations  # noqa: E402
 from evidence import (  # noqa: E402
     adapter_operator_counts,
@@ -27,7 +27,9 @@ from evidence import (  # noqa: E402
     parse_prometheus,
 )
 from manual_composite import evaluate as manual_evaluate  # noqa: E402
+from negative_cases import evaluate as evaluate_negative_cases  # noqa: E402
 from run_experiment import run_discovery_pipeline  # noqa: E402
+from robustness_study import identity_redaction, rate_binding  # noqa: E402
 
 
 INSTANCE_ONE = "instance-18f8d5aa87d20816"
@@ -345,15 +347,23 @@ class DiscoveryTests(unittest.TestCase):
             )
             self.assertEqual(ablations["tracesOnly"]["operator"]["status"], "unresolved")
             self.assertEqual(ablations["fullFusion"]["status"], "typed-delta")
-            self.assertEqual(
-                ablations["negativeAmbiguityReplay"]["status"], "binding-refused"
+            negatives = evaluate_negative_cases(
+                ablation_inputs[2], ablation_inputs[3], delta_path, 0.01
             )
+            self.assertEqual(negatives["ambiguityReplay"]["status"], "binding-refused")
             self.assertEqual(
-                len(ablations["negativeAmbiguityReplay"]["matchingEdgeCandidates"]), 2
+                len(negatives["ambiguityReplay"]["matchingEdgeCandidates"]), 2
             )
-            self.assertEqual(
-                ablations["negativeAmbiguityReplay"]["emittedBindings"], []
-            )
+            self.assertEqual(negatives["ambiguityReplay"]["emittedBindings"], [])
+            self.assertEqual(negatives["contradictionReplay"]["status"], "binding-refused")
+            full_graph = trace_graph(evidence_dir)
+            sampled = rate_binding(base, full_graph, delta, 0.01)
+            self.assertEqual(sampled["status"], "recovered")
+            self.assertFalse(sampled["falseBinding"])
+            redacted = identity_redaction(base, full_graph, delta, 0.01)
+            self.assertAlmostEqual(redacted["globalQ"], 0.99)
+            self.assertIsNone(redacted["globalAffectedEdge"])
+            self.assertEqual(redacted["specificInstance"], "unresolved")
 
             effective = apply_delta(base, delta)
             compiled = compile_estimates(effective, self.contract)
@@ -377,8 +387,10 @@ class DiscoveryTests(unittest.TestCase):
             orchestrated = run_discovery_pipeline(
                 root / "orchestrated", evidence_dir, base_path, protocol
             )
-            self.assertEqual(orchestrated[4]["fullFusion"]["status"], "typed-delta")
-            self.assertTrue(orchestrated[4]["sourceIsolation"]["verified"])
+            self.assertEqual(
+                orchestrated[2]["estimates"]["owner-history"]["modelDiscoveredEstimate"],
+                0.99,
+            )
 
     def test_control_produces_no_state_delta_or_edge_binding(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -420,8 +432,16 @@ class DiscoveryTests(unittest.TestCase):
             self.assertEqual(ablations["metricsOnly"]["stateChanges"], [])
             self.assertEqual(ablations["tracesOnly"]["suppression"]["status"], "no-drift")
             self.assertEqual(ablations["fullFusion"]["status"], "no-drift")
+            negatives = evaluate_negative_cases(
+                ablation_inputs[2], ablation_inputs[3], delta_path, 0.01
+            )
+            self.assertEqual(negatives["ambiguityReplay"]["status"], "not-applicable")
             self.assertEqual(
-                ablations["negativeAmbiguityReplay"]["status"], "not-applicable"
+                negatives["contradictionReplay"]["status"], "not-applicable"
+            )
+            self.assertEqual(
+                rate_binding(base, trace_graph(evidence_dir), delta, 0.01)["status"],
+                "no-drift",
             )
             compiled = compile_estimates(apply_delta(base, delta), self.contract)
             self.assertEqual(
@@ -470,6 +490,8 @@ class DiscoveryTests(unittest.TestCase):
             "compile_journeys.py",
             "collect_trace_evidence.py",
             "evidence_ablations.py",
+            "negative_cases.py",
+            "robustness_study.py",
         ):
             text = (SCRIPTS / filename).read_text(encoding="utf-8")
             for token in forbidden:

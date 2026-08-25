@@ -81,8 +81,9 @@ executions on an instance, while treatment evidence contains 60/60 Customers,
 
 ## Evidence-source ablations and negative control
 
-Every condition also executes source-isolated analyses before the held-out
-outcome window:
+After the primary paired block freezes its evidence, model, estimate, and
+held-out outcome, separate named GitHub Actions steps execute secondary analyses
+using only the frozen pre-outcome evidence inputs:
 
 - metrics-only reads counter/state snapshots but never the trace graph; it may
   recover operator identity, state, and `q`, while the affected edge must remain
@@ -98,11 +99,18 @@ trace graph, while the traces-only directory has bootstrap/current interaction
 graphs but no metric snapshots or operator model. Their manifests and contents
 are retained as artifacts.
 
-For each treatment, an artifact-level counterfactual replay changes the observed
-trace graph so that two normally executed bootstrap edges have the same missing
-execution count as the real `not-permitted` count. The unchanged production
-binding algorithm is rerun and must emit no binding. This is a deliberately
-ambiguous negative control, not an additional live fault condition.
+The negative-case step performs two artifact-level counterfactual replays for
+each treatment. The ambiguity replay makes two normally executed bootstrap
+edges match the real `not-permitted` count. The contradiction replay makes no
+edge match it. The unchanged production binding algorithm must emit no binding
+in either case. These are negative evidence replays, not additional live faults.
+
+The robustness step deterministically replays the frozen evidence at 10% and 1%
+trace sampling while retaining full operator metrics. It reports correct
+recovery, unresolved results, and false bindings separately; fewer than three
+sampled traces for the rejected instance force an unresolved result. A second replay
+removes instance identity from both evidence families: global `q` must remain
+estimable, while the instance-scoped binding must remain unresolved.
 
 ## Reliability compilation
 
@@ -134,10 +142,10 @@ source files.
 
 ## GitHub execution and durability
 
-The reusable pair job has GitHub's 360-minute maximum. The experiment step has a
-300-minute ceiling, reserving one hour for `always()` log capture, teardown, and
-artifact upload. Incremental checkpoints and per-window summaries survive a
-step timeout.
+The reusable pair job has GitHub's 360-minute maximum. The primary experiment
+step has a 300-minute ceiling, and ablations, negative cases, robustness, and
+finalization are separate visible workflow steps. Incremental checkpoints and
+per-window summaries survive a step timeout.
 
 A pilot uses 200 balanced bootstrap requests plus 2,000 evidence and 2,000
 outcome requests per condition at 25 requests/s. A confirmatory pair uses the
@@ -161,7 +169,9 @@ Each condition publishes:
 - raw compressed Jaeger response chunks and generic normalized edge graph;
 - status-only evidence load summary without logical routing identity;
 - bootstrap model, typed delta, effective model, and compiled estimate;
-- metrics-only, traces-only, full-fusion, and ambiguity-replay reports;
+- metrics-only, traces-only, and full-fusion reports;
+- ambiguity and contradictory-evidence negative-case reports;
+- 10%/1% trace-sampling and identity-redaction robustness reports;
 - the hand-maintained dynamic-composite baseline;
 - hidden runtime assignment, manipulation and routing records;
 - held-out per-request semantic decisions and outcome summary;

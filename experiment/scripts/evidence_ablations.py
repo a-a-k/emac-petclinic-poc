@@ -1,17 +1,15 @@
 #!/usr/bin/env python3
-"""Evaluate source-isolated discovery and a counterfactual ambiguity replay."""
+"""Evaluate source-isolated contributions to runtime model discovery."""
 
 from __future__ import annotations
 
 import argparse
-import copy
 import hashlib
 import json
 from pathlib import Path
 
 from discover_model import (
     aggregate_operator,
-    infer_bindings,
     load_adapters,
     metric_observations,
     select_journey_operator,
@@ -153,104 +151,6 @@ def traces_only(
     )
 
 
-def ambiguity_replay(
-    base_model: dict[str, object],
-    current_graph: dict[str, object],
-    observations: list[dict[str, object]],
-    selected_operator: str,
-    tolerance_fraction: float,
-) -> dict[str, object]:
-    """Create two equally supported edge candidates and require binding refusal."""
-    rejected = [
-        row
-        for row in observations
-        if row["operatorName"] == selected_operator and int(row["counts"]["notPermitted"]) > 0
-    ]
-    if not rejected:
-        return {
-            "status": "not-applicable",
-            "reason": "no rejected operator decisions in this condition",
-            "inputPolicy": {"counterfactualTraceGraph": True, "journeyOutcomeRead": False},
-        }
-    if len(rejected) != 1:
-        raise ValueError(f"ambiguity replay requires one rejected instance, observed {len(rejected)}")
-
-    observation = rejected[0]
-    instance_id = str(observation["serviceInstanceId"])
-    rejected_count = int(observation["counts"]["notPermitted"])
-    stable_edges = sorted(
-        (
-            edge
-            for edge in base_model["interactions"]
-            if float(
-                edge.get("byInstance", {}).get(instance_id, {}).get("executionRate") or 0.0
-            )
-            >= 0.95
-        ),
-        key=lambda row: str(row["edgeId"]),
-    )
-    if len(stable_edges) < 2:
-        raise ValueError("ambiguity replay requires at least two stable bootstrap edges")
-
-    replay_graph = copy.deepcopy(current_graph)
-    replay_edges = {row["edgeId"]: row for row in replay_graph["interactions"]}
-    trace_total = int(replay_graph["byInstance"][instance_id]["journeyTraces"])
-    synthetic_executions = trace_total - rejected_count
-    modified_edge_ids = []
-    for base_edge in stable_edges[:2]:
-        edge_id = str(base_edge["edgeId"])
-        row = replay_edges.get(edge_id)
-        if row is None:
-            row = {
-                "edgeId": edge_id,
-                "sourceService": base_edge["sourceService"],
-                "targetService": base_edge["targetService"],
-                "executions": 0,
-                "journeyTraces": 0,
-                "executionRate": None,
-                "operations": base_edge.get("operations", []),
-                "byInstance": {},
-            }
-            replay_graph["interactions"].append(row)
-            replay_edges[edge_id] = row
-        row["byInstance"][instance_id] = {
-            "executions": synthetic_executions,
-            "journeyTraces": trace_total,
-            "executionRate": synthetic_executions / trace_total if trace_total else None,
-        }
-        modified_edge_ids.append(edge_id)
-
-    bindings, audits = infer_bindings(
-        base_model,
-        replay_graph,
-        observations,
-        selected_operator,
-        tolerance_fraction,
-    )
-    relevant_audit = next(
-        row for row in audits if row["serviceInstanceId"] == instance_id
-    )
-    matching = [
-        row["edgeId"] for row in relevant_audit["candidates"] if row["withinTolerance"]
-    ]
-    refused = not bindings and len(matching) >= 2 and not relevant_audit["unique"]
-    return {
-        "status": "binding-refused" if refused else "unexpected-binding",
-        "serviceInstanceId": instance_id,
-        "operatorName": selected_operator,
-        "metricNotPermitted": rejected_count,
-        "syntheticallyAmbiguousEdges": modified_edge_ids,
-        "matchingEdgeCandidates": matching,
-        "emittedBindings": bindings,
-        "audit": relevant_audit,
-        "inputPolicy": {
-            "counterfactualTraceGraph": True,
-            "metricObservationsRead": True,
-            "journeyOutcomeRead": False,
-        },
-    }
-
-
 def evaluate(
     metric_base_path: Path,
     metric_evidence_dir: Path,
@@ -304,20 +204,12 @@ def evaluate(
             "journeyOutcomeRead": False,
         },
     }
-    negative = ambiguity_replay(
-        base_interaction_model,
-        current_graph,
-        observations,
-        str(full_delta["selectedOperator"]),
-        tolerance_fraction,
-    )
     material = {
         "baseModelVersion": base_operator_model["modelVersion"],
         "fullDeltaVersion": full_delta["deltaVersion"],
         "metricsOnly": metric_result,
         "tracesOnly": trace_result,
         "fullFusion": full_result,
-        "negativeAmbiguityReplay": negative,
         "sourceIsolation": source_isolation,
     }
     return {

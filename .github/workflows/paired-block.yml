@@ -67,21 +67,63 @@ jobs:
       - name: Pull the single frozen image set
         run: docker compose --env-file "$COMPOSE_ENV" pull --quiet
 
-      - name: Execute one paired block
+      - name: Resolve paired-block artifact path
+        shell: bash
+        run: |
+          pair_id=$(printf '%02d' "${{ inputs.pair_ordinal }}")
+          echo "PAIR_DIR=$ARTIFACT_ROOT/run/${{ inputs.phase }}/pair-$pair_id" >> "$GITHUB_ENV"
+
+      - name: Execute primary paired block
         timeout-minutes: 300
         shell: bash
         run: |
           set -euo pipefail
           pair_seed=$((${{ inputs.seed_base }} + ${{ inputs.pair_ordinal }}))
-          validity_flag=""
-          if [[ "${{ inputs.enforce_validity }}" != "true" ]]; then
-            validity_flag="--allow-invalid"
-          fi
           python3 experiment/scripts/run_experiment.py \
             --output "$ARTIFACT_ROOT/run" \
             --phase "${{ inputs.phase }}" \
             --pair-ordinal "${{ inputs.pair_ordinal }}" \
             --seed "$pair_seed" \
+            --allow-invalid \
+            --defer-secondary
+
+      - name: Evaluate evidence-source ablations
+        timeout-minutes: 30
+        run: >-
+          python3 experiment/scripts/secondary_analysis.py ablations
+          --pair-dir "$PAIR_DIR"
+          --phase "${{ inputs.phase }}"
+          --pair-ordinal "${{ inputs.pair_ordinal }}"
+
+      - name: Evaluate negative binding cases
+        timeout-minutes: 30
+        run: >-
+          python3 experiment/scripts/secondary_analysis.py negative-cases
+          --pair-dir "$PAIR_DIR"
+          --phase "${{ inputs.phase }}"
+          --pair-ordinal "${{ inputs.pair_ordinal }}"
+
+      - name: Evaluate telemetry robustness
+        timeout-minutes: 60
+        run: >-
+          python3 experiment/scripts/secondary_analysis.py robustness
+          --pair-dir "$PAIR_DIR"
+          --phase "${{ inputs.phase }}"
+          --pair-ordinal "${{ inputs.pair_ordinal }}"
+
+      - name: Finalize paired-block validity and report
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          set -euo pipefail
+          validity_flag=""
+          if [[ "${{ inputs.enforce_validity }}" != "true" ]]; then
+            validity_flag="--allow-invalid"
+          fi
+          python3 experiment/scripts/secondary_analysis.py finalize \
+            --pair-dir "$PAIR_DIR" \
+            --phase "${{ inputs.phase }}" \
+            --pair-ordinal "${{ inputs.pair_ordinal }}" \
             $validity_flag
 
       - name: Capture complete paired-block logs

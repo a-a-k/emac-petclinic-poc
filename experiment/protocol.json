@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "emac.discovery-protocol/v3",
+  "schemaVersion": "emac.discovery-protocol/v4",
   "claimClass": "operator-edge-model-discovery-feasibility",
   "upstreamCommit": "a6619308ef610c0002ce03eedbaf6672a4fc5cae",
   "runtimeIsolation": {
@@ -75,7 +75,26 @@
       "Traces-only may recover a suppressed edge but must leave the operator identity and state unresolved.",
       "Full metrics-plus-traces evidence must recover the typed operator-state and edge-binding delta."
     ],
-    "negativeControl": "Replay the observed treatment evidence graph with two equally count-consistent suppressed edges; the unchanged binding algorithm must refuse to emit a binding."
+    "negativeControls": [
+      "Replay the observed treatment evidence graph with two equally count-consistent suppressed edges; the unchanged binding algorithm must refuse to emit a binding.",
+      "Replay the observed treatment evidence graph with no edge count consistent with operator rejections; the unchanged binding algorithm must refuse to emit a binding."
+    ],
+    "robustness": {
+      "traceSamplingRates": [
+        0.1,
+        0.01
+      ],
+      "minimumSampledInstanceTraces": 3,
+      "traceSamplingPolicy": "Deterministically hash-sample the frozen pre-outcome evidence traces per pair; retain full operator metrics; report recovery, unresolved outcomes, and false bindings separately.",
+      "identityRedaction": "Remove instance identity from both evidence families; require global q to remain estimable while the specific instance and binding remain unresolved."
+    },
+    "workflowSteps": [
+      "primary paired block",
+      "evidence-source ablations",
+      "negative binding cases",
+      "telemetry robustness",
+      "final validity and aggregation"
+    ]
   },
   "validity": {
     "required": [
@@ -91,6 +110,9 @@
       "The compiler reads only the effective model and journey contract.",
       "Evidence-source ablations physically withhold the excluded source rather than merely hiding its output fields.",
       "The ambiguity replay produces at least two count-consistent candidates and no emitted binding.",
+      "The contradiction replay produces no count-consistent candidate and no emitted binding.",
+      "Sampled-trace replays never emit an incorrect binding; insufficient sampled evidence is reported as unresolved.",
+      "Identity-redacted evidence preserves global q but does not fabricate an instance-scoped binding.",
       "The model and estimate freeze predates all held-out outcome requests.",
       "No non-experiment traffic occurs between boundary snapshots.",
       "Boundary values use direct actuator snapshots and exact counter subtraction."

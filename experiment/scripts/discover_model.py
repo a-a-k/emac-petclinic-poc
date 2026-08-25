@@ -68,9 +68,9 @@ def metric_observations(
     return observations
 
 
-def trace_graph(evidence_dir: Path) -> dict[str, object]:
-    traces = read_json(evidence_dir / "traces.normalized.json")
-    by_instance = traces.get("byInstance", {})
+def interactions_from_by_instance(
+    by_instance: dict[str, dict[str, object]],
+) -> list[dict[str, object]]:
     interactions: dict[str, dict[str, object]] = {}
     for instance_id, instance in by_instance.items():
         trace_count = int(instance["journeyTraces"])
@@ -122,11 +122,17 @@ def trace_graph(evidence_dir: Path) -> dict[str, object]:
                 "byInstance": dict(sorted(row["byInstance"].items())),
             }
         )
+    return normalized
+
+
+def trace_graph(evidence_dir: Path) -> dict[str, object]:
+    traces = read_json(evidence_dir / "traces.normalized.json")
+    by_instance = traces.get("byInstance", {})
     return {
         "returnedRawTraces": traces["returnedRawTraces"],
         "normalizedJourneyTraces": traces["normalizedJourneyTraces"],
         "byInstance": by_instance,
-        "interactions": normalized,
+        "interactions": interactions_from_by_instance(by_instance),
         "timing": traces.get("timing", {}),
     }
 

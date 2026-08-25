@@ -30,6 +30,12 @@ def pair(ordinal: int, valid: bool) -> dict[str, object]:
             },
             "owner-only": {},
         },
+        "robustness": {
+            "traceSampling": {
+                "0.1": {"discovery": {"status": "no-drift", "falseBinding": False}},
+                "0.01": {"discovery": {"status": "no-drift", "falseBinding": False}},
+            }
+        },
     }
     treatment = {
         **control,
@@ -42,6 +48,13 @@ def pair(ordinal: int, valid: bool) -> dict[str, object]:
                 "tracesOnlyEdgeRecovery": True,
                 "fullFusionTypedRecovery": True,
                 "ambiguityReplayRefusesBinding": True,
+                "contradictionReplayRefusesBinding": True,
+            }
+        },
+        "robustness": {
+            "traceSampling": {
+                "0.1": {"discovery": {"status": "recovered", "falseBinding": False}},
+                "0.01": {"discovery": {"status": "unresolved", "falseBinding": False}},
             }
         },
     }
@@ -66,6 +79,10 @@ class MatrixAggregationTests(unittest.TestCase):
                 "ambiguityReplayRefusesBinding"
             ],
             {"numerator": 2, "denominator": 2},
+        )
+        self.assertEqual(
+            report["robustness"]["traceSampling"]["0.1"]["treatments"],
+            {"recovered": 2, "unresolved": 0, "falseBindings": 0, "denominator": 2},
         )
 
     def test_replacements_are_bounded_and_zero_uses_noop_matrix(self) -> None:
