@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://emac.example/schemas/candidate-model-delta.schema.json",
+  "title": "EmaC candidate model delta v2",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "deltaVersion",
+    "baseModelVersion",
+    "selectedOperator",
+    "stateChanges",
+    "bindings",
+    "runtimeParameters",
+    "observedOperators",
+    "observedTraceGraph",
+    "discoveryAudit",
+    "evidenceRefs"
+  ],
+  "properties": {
+    "schemaVersion": {"const": "emac.candidate-model-delta/v2"},
+    "deltaVersion": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "baseModelVersion": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "stateChanges": {"type": "array"},
+    "bindings": {"type": "array"},
+    "runtimeParameters": {"type": "object"},
+    "observedOperators": {"type": "array"},
+    "observedTraceGraph": {"type": "object"},
+    "discoveryAudit": {"type": "object"},
+    "evidenceRefs": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["path", "sha256", "bytes"]
+      }
+    }
+  }
+}

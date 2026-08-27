@@ -15,6 +15,7 @@ x-otel-env: &otel-env
   OTEL_METRICS_EXPORTER: none
   OTEL_LOGS_EXPORTER: none
   OTEL_TRACES_SAMPLER: always_on
+  OTEL_INSTRUMENTATION_HTTP_SERVER_CAPTURE_REQUEST_HEADERS: x-experiment-run-id
 
 x-app-env: &app-env
   SPRING_PROFILES_ACTIVE: docker

@@ -4,10 +4,15 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 from pathlib import Path
 
+from artifact_integrity import (
+    evidence_references,
+    seal_artifact,
+    validate_bootstrap_model,
+    validate_contract,
+)
 from evidence import (
     adapter_operator_counts,
     adapter_operator_state,
@@ -19,11 +24,6 @@ from evidence import (
 
 def read_json(path: Path) -> dict[str, object]:
     return json.loads(path.read_text(encoding="utf-8"))
-
-
-def stable_hash(value: object) -> str:
-    encoded = json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
 
 
 def load_adapters(path: Path) -> list[dict[str, object]]:
@@ -141,6 +141,7 @@ def discover_bootstrap(
     evidence_dir: Path, contract_path: Path, adapters_path: Path
 ) -> dict[str, object]:
     contract = read_json(contract_path)
+    validate_contract(contract)
     adapters = load_adapters(adapters_path)
     operators = metric_observations(evidence_dir, adapters)
     graph = trace_graph(evidence_dir)
@@ -154,25 +155,26 @@ def discover_bootstrap(
             for instance_id in graph["byInstance"]
         }
     )
-    material = {
+    artifact = {
+        "schemaVersion": "emac.discovered-interaction-model/v2",
+        "discoveryMode": "bootstrap-runtime-evidence",
         "contractId": contract["contractId"],
+        "contractVersion": contract["contractVersion"],
         "instances": [
             {"serviceName": service, "serviceInstanceId": instance}
             for service, instance in instances
         ],
         "interactions": graph["interactions"],
         "operators": operators,
-    }
-    return {
-        "schemaVersion": "emac.discovered-interaction-model/v1",
-        "modelVersion": stable_hash(material),
-        "discoveryMode": "bootstrap-runtime-evidence",
-        **material,
+        "evidenceRefs": evidence_references(evidence_dir),
         "evidenceSummary": {
             "normalizedJourneyTraces": graph["normalizedJourneyTraces"],
             "traceTiming": graph["timing"],
         },
     }
+    result = seal_artifact(artifact, "modelVersion")
+    validate_bootstrap_model(result)
+    return result
 
 
 def aggregate_operator(
@@ -273,8 +275,16 @@ def infer_bindings(
                     "serviceName": observation["serviceName"],
                     "serviceInstanceId": instance_id,
                     "affectedEdge": {
-                        key: matches[0][key]
-                        for key in ("edgeId", "sourceService", "targetService")
+                        **{
+                            key: matches[0][key]
+                            for key in ("edgeId", "sourceService", "targetService")
+                        },
+                        "operations": sorted(
+                            str(value)
+                            for value in base_edges[matches[0]["edgeId"]].get(
+                                "operations", []
+                            )
+                        ),
                     },
                     "evidence": {
                         "metricNotPermitted": rejected,
@@ -293,6 +303,7 @@ def discover_delta(
     tolerance_fraction: float,
 ) -> dict[str, object]:
     base_model = read_json(base_model_path)
+    validate_bootstrap_model(base_model)
     adapters = load_adapters(adapters_path)
     observations = metric_observations(evidence_dir, adapters)
     graph = trace_graph(evidence_dir)
@@ -345,19 +356,16 @@ def discover_delta(
         "q": counts["permitted"] / counts["decisions"],
         "A_V": counts["permittedSuccessful"] / counts["permitted"],
     }
-    material = {
+    artifact = {
+        "schemaVersion": "emac.candidate-model-delta/v2",
         "baseModelVersion": base_model["modelVersion"],
         "selectedOperator": selected_operator,
         "stateChanges": state_changes,
         "bindings": bindings,
         "runtimeParameters": runtime_parameters,
-    }
-    return {
-        "schemaVersion": "emac.typed-model-delta/v1",
-        "deltaVersion": stable_hash(material),
-        **material,
         "observedOperators": observations,
         "observedTraceGraph": graph,
+        "evidenceRefs": evidence_references(evidence_dir),
         "discoveryAudit": {
             "operatorSelection": selection_audit,
             "operatorEdgeBindings": binding_audit,
@@ -368,6 +376,7 @@ def discover_delta(
             "outcomeRead": False,
         }
     }
+    return seal_artifact(artifact, "deltaVersion")
 
 
 def write_json(path: Path, value: object) -> None:

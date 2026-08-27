@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "emac.discovery-protocol/v4",
+  "schemaVersion": "emac.discovery-protocol/v5",
   "claimClass": "operator-edge-model-discovery-feasibility",
   "upstreamCommit": "a6619308ef610c0002ce03eedbaf6672a4fc5cae",
   "runtimeIsolation": {
@@ -67,7 +67,8 @@
     "breakerOpenBudgetSeconds": 21600,
     "localAvailabilityTolerancePercentagePoints": 0.1,
     "minimumTraceCoverage": 0.99,
-    "operatorEdgeBindingToleranceFraction": 0.01
+    "operatorEdgeBindingToleranceFraction": 0.01,
+    "traceRunIdFilter": "Require the captured X-Experiment-Run-Id on every admitted entry span and report rejected adjacent-window traces."
   },
   "evaluation": {
     "evidenceSourceAblations": [
@@ -76,8 +77,8 @@
       "Full metrics-plus-traces evidence must recover the typed operator-state and edge-binding delta."
     ],
     "negativeControls": [
-      "Replay the observed treatment evidence graph with two equally count-consistent suppressed edges; the unchanged binding algorithm must refuse to emit a binding.",
-      "Replay the observed treatment evidence graph with no edge count consistent with operator rejections; the unchanged binding algorithm must refuse to emit a binding."
+      "Replay the observed treatment evidence through the production discovery/reconciliation/application/compiler pipeline with two equally count-consistent suppressed edges; reconciliation must be unresolved and compilation UNASSESSABLE.",
+      "Replay the observed treatment evidence through the same production pipeline with no count-consistent edge; reconciliation must be contradictory and compilation UNASSESSABLE."
     ],
     "robustness": {
       "traceSamplingRates": [
@@ -106,15 +107,17 @@
       "The condition completes before waitDurationInOpenState elapses.",
       "Opaque instance identifiers are recovered from telemetry rather than logical Compose slots.",
       "The treatment operator-to-edge binding is unique within the predeclared tolerance.",
-      "The effective model is produced only by applying the typed delta to model v0.",
+      "Every contract, model, delta, reconciliation, and compilation content hash is recomputed and verified before use.",
+      "Every discovered affected edge is structurally consistent with the bootstrap graph and uniquely satisfies the journey's declared semantic interaction role.",
+      "The effective model is produced only by applying fields admitted by the versioned reconciliation decision to model v0.",
       "The compiler reads only the effective model and journey contract.",
       "Evidence-source ablations physically withhold the excluded source rather than merely hiding its output fields.",
-      "The ambiguity replay produces at least two count-consistent candidates and no emitted binding.",
-      "The contradiction replay produces no count-consistent candidate and no emitted binding.",
+      "The ambiguity replay produces a versioned unresolved decision and an UNASSESSABLE compilation through the production pipeline.",
+      "The contradiction replay produces a versioned contradictory decision and an UNASSESSABLE compilation through the production pipeline.",
       "Sampled-trace replays never emit an incorrect binding; insufficient sampled evidence is reported as unresolved.",
       "Identity-redacted evidence preserves global q but does not fabricate an instance-scoped binding.",
       "The model and estimate freeze predates all held-out outcome requests.",
-      "No non-experiment traffic occurs between boundary snapshots.",
+      "Every admitted evidence trace carries the exact measurement-window run ID; rejected run-ID traces are counted.",
       "Boundary values use direct actuator snapshots and exact counter subtraction."
     ]
   }

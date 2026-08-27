@@ -14,9 +14,11 @@ the declared generic Resilience4j adapter.
 
 ## Declared versus discovered
 
-The EmaC input contract declares only the journey entrypoint, target, and whether
-a suppressed interaction satisfies each journey. The generic adapter catalog
-declares Resilience4j metric syntax and circuit-breaker semantics.
+The EmaC input contract declares the journey entrypoint and target, a semantic
+interaction role expressed as an operation predicate, and whether suppression of
+that role satisfies each journey. It does not declare which runtime service edge
+will satisfy the role. The generic adapter catalog declares Resilience4j metric
+syntax and circuit-breaker semantics.
 
 The following application facts are not EmaC inputs:
 
@@ -45,17 +47,19 @@ restart telemetry and both gateways
   -> evidence counter snapshot E0
   -> evidence traffic with response bodies discarded
   -> counter snapshot E1 and generic trace-graph extraction
-  -> discover typed operator-state/edge-binding delta
-  -> apply delta to v0, producing effective-model v1
+  -> discover candidate typed operator-state/edge-binding delta
+  -> reconcile as identified, unresolved, or contradictory
+  -> apply only an identified delta to v0, producing effective-model v1
   -> compile journey estimates only from v1 + journey contract
   -> freeze model/estimate versions
   -> send new held-out requests and evaluate response semantics
 ```
 
-The compiler cannot read metrics or traces. It accepts only
-`effective-model.json` and `journey-contract.json`. The effective model records
-its parent model and applied delta versions; the compiled estimate records the
-effective model version.
+The compiler implementation reads only `effective-model.json` and
+`journey-contract.json`; filesystem-level process isolation is not claimed. Every
+stage recomputes the complete content hash of its inputs before use. The effective
+model records its parent, candidate delta, and reconciliation versions; the
+compiled estimate records both the effective-model and contract versions.
 
 ## Discovery rule
 
@@ -71,8 +75,11 @@ operator only if exactly one edge satisfies:
 missing runtime edge executions ~= not-permitted calls
 ```
 
-within the predeclared one-percent tolerance. Ambiguous or absent bindings make
-the treatment invalid; EmaC does not select the most convenient candidate.
+within the predeclared one-percent tolerance. The discovered edge must also
+uniquely satisfy the semantic operation predicate required by the journey.
+Ambiguous evidence produces a versioned `unresolved` decision; conflicting
+evidence produces `contradictory`. Neither delta is applied and compilation
+returns `UNASSESSABLE` rather than raising an exception or selecting a candidate.
 
 For example, if bootstrap contains 100/100 Customers and 100/100 Visits edge
 executions on an instance, while treatment evidence contains 60/60 Customers,
@@ -102,8 +109,10 @@ are retained as artifacts.
 The negative-case step performs two artifact-level counterfactual replays for
 each treatment. The ambiguity replay makes two normally executed bootstrap
 edges match the real `not-permitted` count. The contradiction replay makes no
-edge match it. The unchanged production binding algorithm must emit no binding
-in either case. These are negative evidence replays, not additional live faults.
+edge match it. Each mutated evidence set passes through the same production
+`discover -> reconcile -> apply -> compile` functions. Expected results are an
+`unresolved`/`contradictory` decision and `UNASSESSABLE`, respectively. These are
+negative evidence replays, not additional live faults.
 
 The robustness step deterministically replays the frozen evidence at 10% and 1%
 trace sampling while retaining full operator metrics. It reports correct
@@ -154,7 +163,9 @@ requests/s. Load submission is bounded to 128 in-flight requests, and reports
 achieved throughput and latency percentiles rather than only scheduled rate.
 Jaeger evidence is queried in ten-second time chunks; every raw response is
 immediately written as a separate gzip artifact before its decoded tree is
-released, bounding peak collector memory independently of window size.
+released, bounding peak collector memory independently of window size. The Java
+agent captures `X-Experiment-Run-Id`; normalization admits only entry spans with
+the exact window ID and reports rejected adjacent-window traces.
 
 The default workflow dispatch runs only the pilot. Twenty confirmatory pairs are
 enabled by an explicit boolean dispatch input and start only after that dispatch's
@@ -168,7 +179,10 @@ Each condition publishes:
 - direct boundary metric snapshots with opaque identity tags;
 - raw compressed Jaeger response chunks and generic normalized edge graph;
 - status-only evidence load summary without logical routing identity;
-- bootstrap model, typed delta, effective model, and compiled estimate;
+- hash-addressed evidence references, bootstrap model, candidate typed delta,
+  reconciliation decision, effective model, and compiled estimate;
+- published JSON Schemas and exact discovery/reconciliation/application/compiler
+  timing;
 - metrics-only, traces-only, and full-fusion reports;
 - ambiguity and contradictory-evidence negative-case reports;
 - 10%/1% trace-sampling and identity-redaction robustness reports;

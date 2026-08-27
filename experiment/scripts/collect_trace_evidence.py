@@ -21,6 +21,14 @@ def contains_any(values: list[object], needles: tuple[str, ...]) -> bool:
     return any(needle.lower() in text for needle in needles)
 
 
+def tag_values(value: object) -> set[str]:
+    if isinstance(value, list):
+        return {str(item) for item in value}
+    if value is None:
+        return set()
+    return {str(value)}
+
+
 def parent_span_id(span: dict[str, object]) -> str | None:
     for reference in span.get("references", []) or []:
         if str(reference.get("refType", "")).upper() == "CHILD_OF":
@@ -68,7 +76,9 @@ def operation_from_span(span: dict[str, object], tags: dict[str, object]) -> str
 
 
 def normalize_trace(
-    trace: dict[str, object], contract: dict[str, object]
+    trace: dict[str, object],
+    contract: dict[str, object],
+    expected_run_id: str | None = None,
 ) -> dict[str, object] | None:
     entrypoint = contract["entrypoint"]
     entry_service = str(entrypoint["serviceName"])
@@ -91,6 +101,7 @@ def normalize_trace(
 
     journey = False
     entry_instances: set[str] = set()
+    observed_run_ids: set[str] = set()
     for span in spans:
         process = processes.get(str(span.get("processID", "")), {})
         if process.get("serviceName") != entry_service:
@@ -98,11 +109,18 @@ def normalize_trace(
         tags = tags_as_dict(span.get("tags"))
         if contains_any([span.get("operationName", ""), *tags.values()], selectors):
             journey = True
+            for key in (
+                "http.request.header.x_experiment_run_id",
+                "http.request.header.x-experiment-run-id",
+            ):
+                observed_run_ids.update(tag_values(tags.get(key)))
             instance = process.get("serviceInstanceId", "")
             if instance:
                 entry_instances.add(instance)
 
     if not journey or len(entry_instances) != 1:
+        return None
+    if expected_run_id is not None and observed_run_ids != {expected_run_id}:
         return None
     entry_instance = next(iter(entry_instances))
 
@@ -144,6 +162,7 @@ def normalize_trace(
         "traceId": trace.get("traceID"),
         "entryService": entry_service,
         "entryInstance": entry_instance,
+        "experimentRunIds": sorted(observed_run_ids),
         "edges": normalized_edges,
     }
 
@@ -169,6 +188,7 @@ def collect(
     output_dir: Path,
     limit: int,
     contract: dict[str, object],
+    expected_run_id: str | None = None,
     timeout: int = 300,
     chunk_seconds: int = 10,
 ) -> dict[str, object]:
@@ -189,6 +209,7 @@ def collect(
     max_chunk_raw_bytes = 0
     query_chunks: list[dict[str, object]] = []
     seen_trace_ids: set[str] = set()
+    rejected_run_id_traces = 0
 
     chunk_us = chunk_seconds * 1_000_000
     cursor = start_us
@@ -224,7 +245,10 @@ def collect(
                 continue
             if trace_id:
                 seen_trace_ids.add(trace_id)
-            row = normalize_trace(trace, contract)
+            unfiltered = normalize_trace(trace, contract)
+            row = normalize_trace(trace, contract, expected_run_id)
+            if unfiltered is not None and row is None and expected_run_id is not None:
+                rejected_run_id_traces += 1
             if row is None:
                 continue
             chunk_normalized += 1
@@ -275,6 +299,8 @@ def collect(
             "limit": limit,
             "chunkSeconds": chunk_seconds,
             "chunks": query_chunks,
+            "expectedRunId": expected_run_id,
+            "runIdFilterEnforced": expected_run_id is not None,
         },
         "timing": {
             "querySeconds": total_query_seconds,
@@ -286,6 +312,7 @@ def collect(
         },
         "returnedRawTraces": returned_raw_traces,
         "normalizedJourneyTraces": normalized_count,
+        "rejectedRunIdTraces": rejected_run_id_traces,
         "byInstance": by_instance,
         "perTraceRowsRetained": False,
     }
@@ -304,6 +331,7 @@ def main() -> None:
     parser.add_argument("--timeout", type=int, default=300)
     parser.add_argument("--chunk-seconds", type=int, default=10)
     parser.add_argument("--contract", type=Path, required=True)
+    parser.add_argument("--expected-run-id")
     parser.add_argument("--output-dir", type=Path, required=True)
     args = parser.parse_args()
     contract = json.loads(args.contract.read_text(encoding="utf-8"))
@@ -314,6 +342,7 @@ def main() -> None:
         args.output_dir,
         args.limit,
         contract,
+        args.expected_run_id,
         args.timeout,
         args.chunk_seconds,
     )

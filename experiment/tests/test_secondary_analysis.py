@@ -40,11 +40,15 @@ class SecondaryAnalysisTests(unittest.TestCase):
         negatives = {
             "ambiguityReplay": {
                 "status": "binding-refused",
+                "reconciliationStatus": "unresolved",
+                "compilationStatus": "UNASSESSABLE",
                 "matchingEdgeCandidates": ["edge-a", "edge-b"],
                 "emittedBindings": [],
             },
             "contradictionReplay": {
                 "status": "binding-refused",
+                "reconciliationStatus": "contradictory",
+                "compilationStatus": "UNASSESSABLE",
                 "emittedBindings": [],
             },
         }

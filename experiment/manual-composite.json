@@ -1,6 +1,7 @@
 {
   "schemaVersion": "emac.manual-composite/v1",
   "operatorName": "getOwnerDetails",
+  "primaryInteractionRole": "visit-history-branch",
   "primaryEdge": {
     "sourceService": "api-gateway",
     "targetService": "visits-service"

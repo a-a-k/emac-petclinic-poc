@@ -4,10 +4,15 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 from pathlib import Path
 
+from artifact_integrity import (
+    binding_matches_role,
+    seal_artifact,
+    validate_contract,
+    validate_effective_model,
+)
 
 def read_json(path: Path) -> dict[str, object]:
     return json.loads(path.read_text(encoding="utf-8"))
@@ -20,15 +25,60 @@ def target_side(value: float, target: float) -> str:
 def compile_estimates(
     effective_model: dict[str, object], contract: dict[str, object]
 ) -> dict[str, object]:
+    validate_effective_model(effective_model)
+    validate_contract(contract)
+    estimates: dict[str, object] = {}
+    if effective_model["reconciliationStatus"] != "identified":
+        reason = f"model-{effective_model['reconciliationStatus']}"
+        for journey_id, declaration in contract["journeys"].items():
+            estimates[journey_id] = {
+                "assessmentStatus": "UNASSESSABLE",
+                "target": float(declaration["target"]),
+                "reason": reason,
+                "requiredInteractionRole": declaration["suppressedInteractionRole"],
+            }
+        artifact = {
+            "schemaVersion": "emac.compiled-journey-estimates/v2",
+            "status": "UNASSESSABLE",
+            "effectiveModelVersion": effective_model["modelVersion"],
+            "reconciliationVersion": effective_model["reconciliationVersion"],
+            "contractId": contract["contractId"],
+            "contractVersion": contract["contractVersion"],
+            "estimates": estimates,
+            "inputPolicy": {
+                "lineageVerified": True,
+                "rawMetricsRead": False,
+                "rawTracesRead": False,
+                "responseBodyRead": False,
+                "outcomeRead": False,
+            },
+        }
+        return seal_artifact(artifact, "compilationVersion")
+
     runtime = effective_model["runtimeReliability"]
     a_prefix = float(runtime["A_P"])
     q = float(runtime["q"])
     a_visits = float(runtime["A_V"])
-    if q < 1.0 and len(effective_model.get("operatorBindings", [])) != 1:
-        raise ValueError("suppression was measured but no unique operator-to-edge binding exists")
 
-    estimates: dict[str, object] = {}
+    all_assessed = True
     for journey_id, declaration in contract["journeys"].items():
+        role_id = str(declaration["suppressedInteractionRole"])
+        role = contract["interactionRoles"][role_id]
+        matching_bindings = [
+            binding
+            for binding in effective_model.get("operatorBindings", [])
+            if binding_matches_role(binding, role)
+        ]
+        if q < 1.0 and len(matching_bindings) != 1:
+            all_assessed = False
+            estimates[journey_id] = {
+                "assessmentStatus": "UNASSESSABLE",
+                "target": float(declaration["target"]),
+                "reason": "required-interaction-role-not-uniquely-bound",
+                "requiredInteractionRole": role_id,
+                "matchingBindingCount": len(matching_bindings),
+            }
+            continue
         a_suppressed = 1.0 if declaration["suppressedInteractionSatisfies"] else 0.0
         discovered = a_prefix * (
             q * a_visits + (1.0 - q * a_visits) * a_suppressed
@@ -36,7 +86,12 @@ def compile_estimates(
         frozen = a_prefix * (a_visits + (1.0 - a_visits) * a_suppressed)
         target = float(declaration["target"])
         estimates[journey_id] = {
+            "assessmentStatus": "ASSESSED",
             "target": target,
+            "requiredInteractionRole": role_id,
+            "semanticBinding": (
+                matching_bindings[0]["affectedEdge"] if matching_bindings else None
+            ),
             "suppressedInteractionSatisfies": declaration[
                 "suppressedInteractionSatisfies"
             ],
@@ -46,26 +101,24 @@ def compile_estimates(
             "frozenModelTargetSide": target_side(frozen, target),
         }
 
-    material = {
+    artifact = {
+        "schemaVersion": "emac.compiled-journey-estimates/v2",
+        "status": "ASSESSED" if all_assessed else "UNASSESSABLE",
         "effectiveModelVersion": effective_model["modelVersion"],
+        "reconciliationVersion": effective_model["reconciliationVersion"],
         "contractId": contract["contractId"],
+        "contractVersion": contract["contractVersion"],
         "estimates": estimates,
-    }
-    compilation_version = hashlib.sha256(
-        json.dumps(material, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    ).hexdigest()
-    return {
-        "schemaVersion": "emac.compiled-journey-estimates/v1",
-        "compilationVersion": compilation_version,
-        **material,
         "runtimeParametersFromEffectiveModel": runtime,
         "inputPolicy": {
+            "lineageVerified": True,
             "rawMetricsRead": False,
             "rawTracesRead": False,
             "responseBodyRead": False,
             "outcomeRead": False,
         },
     }
+    return seal_artifact(artifact, "compilationVersion")
 
 
 def main() -> None:

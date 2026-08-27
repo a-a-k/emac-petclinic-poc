@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://emac.example/schemas/compiled-journey-estimates.schema.json",
+  "title": "EmaC compiled journey estimates v2",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "compilationVersion",
+    "status",
+    "effectiveModelVersion",
+    "reconciliationVersion",
+    "contractId",
+    "contractVersion",
+    "estimates",
+    "inputPolicy"
+  ],
+  "properties": {
+    "schemaVersion": {"const": "emac.compiled-journey-estimates/v2"},
+    "compilationVersion": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "status": {"enum": ["ASSESSED", "UNASSESSABLE"]},
+    "effectiveModelVersion": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "contractVersion": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "estimates": {"type": "object"},
+    "inputPolicy": {"type": "object"}
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://emac.example/schemas/effective-interaction-model.schema.json",
+  "title": "EmaC effective interaction model v2",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "modelVersion",
+    "parentModelVersion",
+    "candidateDeltaVersion",
+    "reconciliationVersion",
+    "reconciliationStatus",
+    "appliedDeltaVersion",
+    "operatorBindings",
+    "evidenceRefs"
+  ],
+  "properties": {
+    "schemaVersion": {"const": "emac.effective-interaction-model/v2"},
+    "modelVersion": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "reconciliationStatus": {"enum": ["identified", "unresolved", "contradictory"]},
+    "appliedDeltaVersion": {"type": ["string", "null"]},
+    "operatorBindings": {"type": "array"},
+    "evidenceRefs": {"type": "array", "minItems": 1}
+  }
+}

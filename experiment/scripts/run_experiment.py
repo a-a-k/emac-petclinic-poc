@@ -434,6 +434,7 @@ def collect_window_traces(
         evidence_dir,
         limit=requests + int(protocol["measurement"]["traceQueryLimitPadding"]),
         contract=contract,
+        expected_run_id=label,
         timeout=int(protocol["measurement"]["traceQueryTimeoutSeconds"]),
         chunk_seconds=int(protocol["measurement"]["traceQueryChunkSeconds"]),
     )
@@ -448,12 +449,14 @@ def collect_window_traces(
     return result
 
 
-def run_script(script: str, *args: str) -> None:
+def run_script(script: str, *args: str) -> float:
+    started = time.monotonic()
     subprocess.run(
         [sys.executable, str(ROOT / "experiment" / "scripts" / script), *args],
         cwd=ROOT,
         check=True,
     )
+    return time.monotonic() - started
 
 
 def run_bootstrap(
@@ -486,7 +489,8 @@ def run_bootstrap(
     collect_window_traces(evidence_dir, load, requests, protocol, contract, f"{run_id}-bootstrap")
 
     model_path = condition_dir / "model" / "bootstrap-model.json"
-    run_script(
+    timings: dict[str, float] = {}
+    timings["discoverySeconds"] = run_script(
         "discover_model.py",
         "bootstrap",
         "--evidence",
@@ -503,8 +507,9 @@ def run_bootstrap(
     write_json(
         condition_dir / "model" / "bootstrap-freeze.json",
         {
-            "schemaVersion": "emac.bootstrap-freeze/v1",
+            "schemaVersion": "emac.bootstrap-freeze/v2",
             "modelVersion": model["modelVersion"],
+            "discoverySeconds": timings["discoverySeconds"],
             "frozenAtUnixNs": frozen_ns,
         },
     )
@@ -628,12 +633,14 @@ def run_discovery_pipeline(
 ]:
     model_dir = condition_dir / "model"
     delta_path = model_dir / "typed-delta.json"
+    reconciliation_path = model_dir / "reconciliation.json"
     effective_path = model_dir / "effective-model.json"
     compiled_path = model_dir / "compiled-estimates.json"
     manual_path = condition_dir / "baselines" / "manual-dynamic-composite.json"
     tolerance = str(protocol["measurement"]["operatorEdgeBindingToleranceFraction"])
 
-    run_script(
+    timings: dict[str, float] = {}
+    timings["discoverySeconds"] = run_script(
         "discover_model.py",
         "delta",
         "--base-model",
@@ -647,16 +654,27 @@ def run_discovery_pipeline(
         "--output",
         str(delta_path),
     )
-    run_script(
+    timings["reconciliationSeconds"] = run_script(
+        "reconcile_model_delta.py",
+        "--base-model",
+        str(bootstrap_model_path),
+        "--candidate-delta",
+        str(delta_path),
+        "--output",
+        str(reconciliation_path),
+    )
+    timings["modelApplicationSeconds"] = run_script(
         "apply_model_delta.py",
         "--base-model",
         str(bootstrap_model_path),
         "--delta",
         str(delta_path),
+        "--reconciliation",
+        str(reconciliation_path),
         "--output",
         str(effective_path),
     )
-    run_script(
+    timings["compilationSeconds"] = run_script(
         "compile_journeys.py",
         "--effective-model",
         str(effective_path),
@@ -665,7 +683,7 @@ def run_discovery_pipeline(
         "--output",
         str(compiled_path),
     )
-    run_script(
+    timings["manualBaselineSeconds"] = run_script(
         "manual_composite.py",
         "--evidence",
         str(evidence_dir),
@@ -679,16 +697,33 @@ def run_discovery_pipeline(
         str(manual_path),
     )
     delta = read_json(delta_path)
+    reconciliation = read_json(reconciliation_path)
     effective = read_json(effective_path)
     compiled = read_json(compiled_path)
     manual = read_json(manual_path)
+    timings["emacPipelineSeconds"] = sum(
+        timings[key]
+        for key in (
+            "discoverySeconds",
+            "reconciliationSeconds",
+            "modelApplicationSeconds",
+            "compilationSeconds",
+        )
+    )
+    write_json(
+        model_dir / "pipeline-timing.json",
+        {"schemaVersion": "emac.pipeline-timing/v1", **timings},
+    )
     freeze_ns = time.time_ns()
     freeze = {
-        "schemaVersion": "emac.pre-outcome-freeze/v3",
+        "schemaVersion": "emac.pre-outcome-freeze/v4",
         "bootstrapModelVersion": read_json(bootstrap_model_path)["modelVersion"],
         "deltaVersion": delta["deltaVersion"],
+        "reconciliationVersion": reconciliation["reconciliationVersion"],
+        "reconciliationStatus": reconciliation["status"],
         "effectiveModelVersion": effective["modelVersion"],
         "compilationVersion": compiled["compilationVersion"],
+        "pipelineTiming": timings,
         "frozenAtUnixNs": freeze_ns,
     }
     freeze_path = model_dir / "pre-outcome-freeze.json"
@@ -791,9 +826,14 @@ def condition_validity(
     chain_valid = (
         delta["baseModelVersion"] == bootstrap["modelVersion"]
         and effective["parentModelVersion"] == bootstrap["modelVersion"]
+        and effective["candidateDeltaVersion"] == delta["deltaVersion"]
         and effective["appliedDeltaVersion"] == delta["deltaVersion"]
+        and effective["reconciliationStatus"] == "identified"
         and compiled["effectiveModelVersion"] == effective["modelVersion"]
+        and compiled["reconciliationVersion"] == effective["reconciliationVersion"]
+        and compiled["status"] == "ASSESSED"
     )
+    trace_query = delta["observedTraceGraph"]["query"]
     checks = {
         "bootstrapFrozenBeforeManipulation": bootstrap_frozen_ns < manipulation_started_ns,
         "cleanGatewayResetAfterBootstrap": (
@@ -812,6 +852,10 @@ def condition_validity(
         "zeroTimeLimiterTimeouts": zero_timeouts,
         "counterDenominatorMatchesEligible": delta["runtimeParameters"]["decisions"] == evidence_load["requested"],
         "traceCoverageAtLeastMinimum": all(value >= minimum_coverage for value in trace_coverage.values()),
+        "traceRunIdFilterEnforced": (
+            trace_query.get("runIdFilterEnforced") is True
+            and trace_query.get("expectedRunId") == evidence_load["runId"]
+        ),
         "modelApplicationChain": chain_valid,
         "freezePrecedesOutcome": freeze_ns < outcome_started_ns,
     }

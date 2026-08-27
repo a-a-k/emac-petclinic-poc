@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import shutil
 import sys
@@ -14,6 +15,7 @@ SCRIPTS = EXPERIMENT / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
 from apply_model_delta import apply_delta  # noqa: E402
+from artifact_integrity import IntegrityError, seal_artifact  # noqa: E402
 from collect_trace_evidence import collect, normalize_trace  # noqa: E402
 from compile_journeys import compile_estimates  # noqa: E402
 from discover_model import discover_bootstrap, discover_delta, trace_graph  # noqa: E402
@@ -28,6 +30,7 @@ from evidence import (  # noqa: E402
 )
 from manual_composite import evaluate as manual_evaluate  # noqa: E402
 from negative_cases import evaluate as evaluate_negative_cases  # noqa: E402
+from reconcile_model_delta import reconcile  # noqa: E402
 from run_experiment import run_discovery_pipeline  # noqa: E402
 from robustness_study import identity_redaction, rate_binding  # noqa: E402
 
@@ -240,6 +243,16 @@ class DiscoveryTests(unittest.TestCase):
             [edge["targetService"] for edge in normalized["edges"]],
             ["downstream-alpha", "downstream-beta"],
         )
+        trace["spans"][0]["tags"].append(
+            {
+                "key": "http.request.header.x_experiment_run_id",
+                "value": ["pair-01-treatment-evidence"],
+            }
+        )
+        self.assertIsNotNone(
+            normalize_trace(trace, self.contract, "pair-01-treatment-evidence")
+        )
+        self.assertIsNone(normalize_trace(trace, self.contract, "adjacent-window"))
 
     @patch("collect_trace_evidence.query_jaeger")
     def test_trace_collection_is_chunked_and_deduplicates_boundaries(self, query) -> None:
@@ -293,7 +306,7 @@ class DiscoveryTests(unittest.TestCase):
             self.assertEqual(result["timing"]["chunkCount"], 3)
             self.assertEqual(len(list((Path(temporary) / "traces.raw.chunks").glob("*.gz"))), 3)
 
-    def test_complete_delta_apply_compile_pipeline(self) -> None:
+    def test_complete_pipeline_rejects_integrity_and_semantic_mutations(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             bootstrap_dir = root / "bootstrap"
@@ -348,7 +361,11 @@ class DiscoveryTests(unittest.TestCase):
             self.assertEqual(ablations["tracesOnly"]["operator"]["status"], "unresolved")
             self.assertEqual(ablations["fullFusion"]["status"], "typed-delta")
             negatives = evaluate_negative_cases(
-                ablation_inputs[2], ablation_inputs[3], delta_path, 0.01
+                base_path,
+                evidence_dir,
+                self.contract_path,
+                self.adapters_path,
+                0.01,
             )
             self.assertEqual(negatives["ambiguityReplay"]["status"], "binding-refused")
             self.assertEqual(
@@ -356,6 +373,16 @@ class DiscoveryTests(unittest.TestCase):
             )
             self.assertEqual(negatives["ambiguityReplay"]["emittedBindings"], [])
             self.assertEqual(negatives["contradictionReplay"]["status"], "binding-refused")
+            self.assertEqual(
+                negatives["ambiguityReplay"]["reconciliationStatus"], "unresolved"
+            )
+            self.assertEqual(
+                negatives["contradictionReplay"]["reconciliationStatus"],
+                "contradictory",
+            )
+            self.assertEqual(
+                negatives["ambiguityReplay"]["compilationStatus"], "UNASSESSABLE"
+            )
             full_graph = trace_graph(evidence_dir)
             sampled = rate_binding(base, full_graph, delta, 0.01)
             self.assertEqual(sampled["status"], "recovered")
@@ -365,13 +392,69 @@ class DiscoveryTests(unittest.TestCase):
             self.assertIsNone(redacted["globalAffectedEdge"])
             self.assertEqual(redacted["specificInstance"], "unresolved")
 
-            effective = apply_delta(base, delta)
+            reconciliation = reconcile(base, delta)
+            self.assertEqual(reconciliation["status"], "identified")
+            effective = apply_delta(base, delta, reconciliation)
             compiled = compile_estimates(effective, self.contract)
+            self.assertEqual(compiled["status"], "ASSESSED")
             self.assertAlmostEqual(
                 compiled["estimates"]["owner-history"]["modelDiscoveredEstimate"], 0.99
             )
             self.assertAlmostEqual(
                 compiled["estimates"]["owner-only"]["modelDiscoveredEstimate"], 1.0
+            )
+
+            tampered_delta = copy.deepcopy(delta)
+            tampered_delta["runtimeParameters"]["q"] = 0.5
+            with self.assertRaises(IntegrityError):
+                apply_delta(base, tampered_delta, reconciliation)
+
+            tampered_graph_delta = copy.deepcopy(delta)
+            tampered_graph_delta["observedTraceGraph"]["interactions"][0][
+                "targetService"
+            ] = "mutated-service"
+            with self.assertRaises(IntegrityError):
+                apply_delta(base, tampered_graph_delta, reconciliation)
+
+            tampered_reconciliation = copy.deepcopy(reconciliation)
+            tampered_reconciliation["admittedFields"].remove("bindings")
+            with self.assertRaises(IntegrityError):
+                apply_delta(base, delta, tampered_reconciliation)
+
+            incomplete_reconciliation = copy.deepcopy(reconciliation)
+            incomplete_reconciliation["admittedFields"].remove("bindings")
+            incomplete_reconciliation = seal_artifact(
+                incomplete_reconciliation, "reconciliationVersion"
+            )
+            with self.assertRaises(IntegrityError):
+                apply_delta(base, delta, incomplete_reconciliation)
+
+            tampered_effective = copy.deepcopy(effective)
+            tampered_effective["runtimeReliability"]["q"] = 0.5
+            with self.assertRaises(IntegrityError):
+                compile_estimates(tampered_effective, self.contract)
+
+            wrong_edge_model = copy.deepcopy(effective)
+            customers_edge = next(
+                edge
+                for edge in wrong_edge_model["interactions"]
+                if edge["targetService"] == "customers-service"
+            )
+            wrong_edge_model["operatorBindings"][0]["affectedEdge"] = {
+                key: copy.deepcopy(customers_edge[key])
+                for key in (
+                    "edgeId",
+                    "sourceService",
+                    "targetService",
+                    "operations",
+                )
+            }
+            wrong_edge_model = seal_artifact(wrong_edge_model, "modelVersion")
+            wrong_edge_compilation = compile_estimates(wrong_edge_model, self.contract)
+            self.assertEqual(wrong_edge_compilation["status"], "UNASSESSABLE")
+            self.assertEqual(
+                wrong_edge_compilation["estimates"]["owner-history"]["reason"],
+                "required-interaction-role-not-uniquely-bound",
             )
             manual = manual_evaluate(
                 evidence_dir,
@@ -433,7 +516,11 @@ class DiscoveryTests(unittest.TestCase):
             self.assertEqual(ablations["tracesOnly"]["suppression"]["status"], "no-drift")
             self.assertEqual(ablations["fullFusion"]["status"], "no-drift")
             negatives = evaluate_negative_cases(
-                ablation_inputs[2], ablation_inputs[3], delta_path, 0.01
+                base_path,
+                evidence_dir,
+                self.contract_path,
+                self.adapters_path,
+                0.01,
             )
             self.assertEqual(negatives["ambiguityReplay"]["status"], "not-applicable")
             self.assertEqual(
@@ -443,7 +530,11 @@ class DiscoveryTests(unittest.TestCase):
                 rate_binding(base, trace_graph(evidence_dir), delta, 0.01)["status"],
                 "no-drift",
             )
-            compiled = compile_estimates(apply_delta(base, delta), self.contract)
+            reconciliation = reconcile(base, delta)
+            self.assertEqual(reconciliation["status"], "identified")
+            compiled = compile_estimates(
+                apply_delta(base, delta, reconciliation), self.contract
+            )
             self.assertEqual(
                 compiled["estimates"]["owner-history"]["modelDiscoveredEstimate"], 1.0
             )
@@ -479,8 +570,16 @@ class DiscoveryTests(unittest.TestCase):
             delta = discover_delta(base_path, evidence_dir, self.adapters_path, 0.01)
             self.assertEqual(delta["bindings"], [])
             self.assertFalse(delta["discoveryAudit"]["operatorEdgeBindings"][0]["unique"])
-            with self.assertRaises(ValueError):
-                compile_estimates(apply_delta(base, delta), self.contract)
+            reconciliation = reconcile(base, delta)
+            self.assertEqual(reconciliation["status"], "unresolved")
+            effective = apply_delta(base, delta, reconciliation)
+            self.assertIsNone(effective["appliedDeltaVersion"])
+            compiled = compile_estimates(effective, self.contract)
+            self.assertEqual(compiled["status"], "UNASSESSABLE")
+            self.assertEqual(
+                compiled["estimates"]["owner-history"]["assessmentStatus"],
+                "UNASSESSABLE",
+            )
 
     def test_discovery_implementation_contains_no_fixture_identity_or_topology(self) -> None:
         forbidden = ("gateway-A", "gateway-B", "getOwnerDetails", "visits-service")

@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://emac.example/schemas/journey-contract.schema.json",
+  "title": "EmaC journey contract v3",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "contractVersion",
+    "contractId",
+    "entrypoint",
+    "interactionRoles",
+    "journeys"
+  ],
+  "properties": {
+    "schemaVersion": {"const": "emac.journey-contract/v3"},
+    "contractVersion": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "contractId": {"type": "string", "minLength": 1},
+    "entrypoint": {"type": "object"},
+    "interactionRoles": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "required": ["operationContains"],
+        "properties": {
+          "operationContains": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"type": "string", "minLength": 1}
+          }
+        }
+      }
+    },
+    "journeys": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "required": ["target", "suppressedInteractionRole", "suppressedInteractionSatisfies"],
+        "properties": {
+          "target": {"type": "number", "minimum": 0, "maximum": 1},
+          "suppressedInteractionRole": {"type": "string", "minLength": 1},
+          "suppressedInteractionSatisfies": {"type": "boolean"}
+        }
+      }
+    }
+  }
+}

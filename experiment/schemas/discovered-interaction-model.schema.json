@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://emac.example/schemas/discovered-interaction-model.schema.json",
+  "title": "EmaC bootstrap interaction model v2",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "modelVersion",
+    "contractId",
+    "contractVersion",
+    "instances",
+    "interactions",
+    "operators",
+    "evidenceRefs"
+  ],
+  "properties": {
+    "schemaVersion": {"const": "emac.discovered-interaction-model/v2"},
+    "modelVersion": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "contractVersion": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "instances": {"type": "array"},
+    "interactions": {"type": "array"},
+    "operators": {"type": "array"},
+    "evidenceRefs": {"type": "array", "minItems": 1}
+  }
+}

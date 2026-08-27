@@ -89,20 +89,11 @@ def run_ablations(pair_dir: Path, protocol: dict[str, object]) -> None:
 def run_negative_cases(pair_dir: Path, protocol: dict[str, object]) -> None:
     tolerance = float(protocol["measurement"]["operatorEdgeBindingToleranceFraction"])
     for condition_dir in condition_dirs(pair_dir):
-        trace_base = (
-            condition_dir
-            / "ablations"
-            / "inputs"
-            / "traces-only"
-            / "bootstrap-interactions.json"
-        )
-        trace_evidence = (
-            condition_dir / "ablations" / "inputs" / "traces-only" / "evidence"
-        )
         report = evaluate_negative_cases(
-            trace_base,
-            trace_evidence,
-            condition_dir / "model" / "typed-delta.json",
+            condition_dir / "model" / "bootstrap-model.json",
+            condition_dir / "evidence",
+            CONTRACT_PATH,
+            ADAPTERS_PATH,
             tolerance,
         )
         write_json(condition_dir / "negative-cases" / "report.json", report)
@@ -197,11 +188,19 @@ def secondary_checks(
                 "fullFusionTypedRecovery": full_fusion["status"] == "typed-delta",
                 "ambiguityReplayRefusesBinding": (
                     negatives["ambiguityReplay"]["status"] == "binding-refused"
+                    and negatives["ambiguityReplay"]["reconciliationStatus"]
+                    == "unresolved"
+                    and negatives["ambiguityReplay"]["compilationStatus"]
+                    == "UNASSESSABLE"
                     and len(negatives["ambiguityReplay"]["matchingEdgeCandidates"]) >= 2
                     and not negatives["ambiguityReplay"]["emittedBindings"]
                 ),
                 "contradictionReplayRefusesBinding": (
                     negatives["contradictionReplay"]["status"] == "binding-refused"
+                    and negatives["contradictionReplay"]["reconciliationStatus"]
+                    == "contradictory"
+                    and negatives["contradictionReplay"]["compilationStatus"]
+                    == "UNASSESSABLE"
                     and not negatives["contradictionReplay"]["emittedBindings"]
                 ),
                 "identityRedactionLeavesBindingUnresolved": (
