@@ -26,6 +26,16 @@ def tag_values(value: object) -> set[str]:
         return {str(item) for item in value}
     if value is None:
         return set()
+    if isinstance(value, str):
+        text = value.strip()
+        if text.startswith("[") and text.endswith("]"):
+            try:
+                decoded = json.loads(text)
+            except json.JSONDecodeError:
+                pass
+            else:
+                if isinstance(decoded, list):
+                    return {str(item) for item in decoded}
     return {str(value)}
 
 

@@ -245,8 +245,8 @@ class DiscoveryTests(unittest.TestCase):
         )
         trace["spans"][0]["tags"].append(
             {
-                "key": "http.request.header.x_experiment_run_id",
-                "value": ["pair-01-treatment-evidence"],
+                "key": "http.request.header.x-experiment-run-id",
+                "value": '["pair-01-treatment-evidence"]',
             }
         )
         self.assertIsNotNone(
