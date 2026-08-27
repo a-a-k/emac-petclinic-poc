@@ -79,9 +79,13 @@ def trace_summary(first_visits: int, second_visits: int, first_total: int, secon
         return {"journeyTraces": total, "edges": edges}
 
     return {
-        "schemaVersion": "emac.discovered-trace-graph/v2",
+        "schemaVersion": "emac.discovered-trace-graph/v3",
         "returnedRawTraces": first_total + second_total,
         "normalizedJourneyTraces": first_total + second_total,
+        "query": {
+            "expectedRunId": "fixture-window",
+            "runIdFilterEnforced": True,
+        },
         "timing": {},
         "byInstance": {
             INSTANCE_ONE: instance(first_total, first_visits),
@@ -334,6 +338,10 @@ class DiscoveryTests(unittest.TestCase):
                 10000,
             )
             delta = discover_delta(base_path, evidence_dir, self.adapters_path, 0.01)
+            self.assertEqual(
+                delta["observedTraceGraph"]["query"]["expectedRunId"],
+                "fixture-window",
+            )
             self.assertEqual(delta["selectedOperator"], "getOwnerDetails")
             self.assertEqual(delta["stateChanges"][0]["serviceInstanceId"], INSTANCE_TWO)
             self.assertEqual(

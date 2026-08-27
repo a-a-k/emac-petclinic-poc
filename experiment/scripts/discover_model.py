@@ -133,6 +133,7 @@ def trace_graph(evidence_dir: Path) -> dict[str, object]:
         "normalizedJourneyTraces": traces["normalizedJourneyTraces"],
         "byInstance": by_instance,
         "interactions": interactions_from_by_instance(by_instance),
+        "query": traces.get("query", {}),
         "timing": traces.get("timing", {}),
     }
 
