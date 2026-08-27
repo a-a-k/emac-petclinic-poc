@@ -1,0 +1,70 @@
+{
+  "schemaVersion": "emac.durable-result-summary/v1",
+  "experiment": {
+    "commit": "c0c1826b7ec70e7d7497f02b09f3f224284192c3",
+    "runId": "33099612734",
+    "runUrl": "https://github.com/a-a-k/emac-petclinic-poc/actions/runs/33099612734",
+    "conclusion": "success",
+    "attemptedPairs": 20,
+    "validPairs": 20,
+    "replacementPairs": 0
+  },
+  "primary": {
+    "exactTreatmentModelRecovery": "20/20",
+    "falseDiscoveryInControls": "0/20",
+    "modelDiscoveryOwnerHistoryAbsoluteError": 0.0,
+    "manualDynamicOwnerHistoryAbsoluteError": 0.0,
+    "frozenOwnerHistoryAbsoluteErrorInTreatments": 0.01,
+    "frozenTargetSideErrorsInTreatments": "20/20"
+  },
+  "evidenceSourceAblations": {
+    "metricsOnlyStateRecoveredEdgeUnresolved": "20/20",
+    "tracesOnlyEdgeRecoveredOperatorUnresolved": "20/20",
+    "fullFusionTypedRecovery": "20/20"
+  },
+  "negativeCases": {
+    "ambiguousBindingRefusedAndUnassessable": "20/20",
+    "contradictoryBindingRefusedAndUnassessable": "20/20"
+  },
+  "robustness": {
+    "traceSampling10Percent": {
+      "recovered": 19,
+      "unresolved": 1,
+      "falseBindings": 0
+    },
+    "traceSampling1Percent": {
+      "recovered": 2,
+      "unresolved": 18,
+      "falseBindings": 0
+    },
+    "identityRedactionGlobalQPreserved": "20/20",
+    "identityRedactionBindingUnresolved": "20/20"
+  },
+  "localAvailabilityAbsoluteDifferencePercentagePoints": {
+    "gatewayMaximum": 0.0,
+    "customersMaximum": 0.0,
+    "visitsMaximum": 0.0
+  },
+  "timingSecondsAcross40ConditionRuns": {
+    "emacPipelineMedian": 0.197629328000005,
+    "emacPipelineMaximum": 0.23699245200003816,
+    "manualCompositeMedian": 0.06594349099995611,
+    "manualCompositeMaximum": 0.08036622900004886,
+    "scope": "Pipeline timing excludes trace collection."
+  },
+  "sourceArtifacts": [
+    {
+      "name": "emac-aggregate-33099612734-1",
+      "artifactId": "9658878017",
+      "sha256": "19d4a0ca2b4793b09aaa84212e5fd0744116b4d44e1c00ddc143f02e60862bc1",
+      "expiresAt": "2026-11-25T17:40:35Z"
+    },
+    {
+      "name": "emac-detailed-summary-33099612734-1",
+      "artifactId": "9659012064",
+      "sha256": "e8bcccb018f7583e79cade89f0aec6daf2eeeeef80c79db6eeccca212fd797c7",
+      "expiresAt": "2026-11-25T18:13:17Z",
+      "summaryRunUrl": "https://github.com/a-a-k/emac-petclinic-poc/actions/runs/33102377370"
+    }
+  ]
+}
