@@ -1,0 +1,56 @@
+name: Summarize an existing experiment run
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: Completed workflow run ID
+        required: true
+        type: string
+      source_run_attempt:
+        description: Completed workflow run attempt
+        required: true
+        default: "1"
+        type: string
+      source_commit:
+        description: Exact experiment commit
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  summarize:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out summarization code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Download retained pair artifacts from the completed run
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ inputs.source_run_id }}
+          pattern: emac-confirmatory-*-${{ inputs.source_run_id }}-${{ inputs.source_run_attempt }}
+          path: collected
+          merge-multiple: true
+
+      - name: Summarize timing and local-SLI balance
+        run: >-
+          python3 experiment/scripts/summarize_artifact_details.py
+          --input collected
+          --output detailed-summary
+          --source-run-id "${{ inputs.source_run_id }}"
+          --source-run-attempt "${{ inputs.source_run_attempt }}"
+          --source-commit "${{ inputs.source_commit }}"
+
+      - name: Publish detailed summary
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08
+        with:
+          name: emac-detailed-summary-${{ inputs.source_run_id }}-${{ github.run_attempt }}
+          path: detailed-summary/
+          if-no-files-found: error
+          retention-days: 90
