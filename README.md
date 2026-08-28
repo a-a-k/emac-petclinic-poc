@@ -23,3 +23,6 @@ the discovery/evaluation pipeline.
 
 See [`experiment/README.md`](experiment/README.md) for the executable protocol,
 artifact boundaries, validity policy, and exact claim.
+
+The latest retained confirmatory outcome and the digest manifest for all 20 raw
+pair artifacts are in [`results/fcb822c`](results/fcb822c/README.md).

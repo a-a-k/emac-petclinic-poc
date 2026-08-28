@@ -1,0 +1,117 @@
+{
+  "schemaVersion": "emac.durable-result-summary/v2",
+  "experiment": {
+    "commit": "fcb822cf348b084c6be6b2cd33a2d0839fde1992",
+    "runId": "33147282217",
+    "runUrl": "https://github.com/a-a-k/emac-petclinic-poc/actions/runs/33147282217",
+    "conclusion": "success",
+    "attemptedPairs": 20,
+    "validPairs": 20,
+    "replacementPairs": 0
+  },
+  "primary": {
+    "exactTreatmentModelRecovery": "20/20",
+    "falseDiscoveryInControls": "0/20",
+    "modelDiscoveryOwnerHistoryAbsoluteError": 0.0,
+    "manualDynamicOwnerHistoryAbsoluteError": 0.0,
+    "frozenOwnerHistoryAbsoluteErrorInTreatments": 0.01,
+    "frozenTargetSideErrorsInTreatments": "20/20"
+  },
+  "evidenceSourceAblations": {
+    "metricsOnlyStateRecoveredEdgeUnresolved": "20/20",
+    "tracesOnlyEdgeRecoveredOperatorUnresolved": "20/20",
+    "fullFusionTypedRecovery": "20/20"
+  },
+  "negativeCases": {
+    "ambiguousBindingRefusedAndUnassessable": "20/20",
+    "contradictoryBindingRefusedAndUnassessable": "20/20"
+  },
+  "robustness": {
+    "traceSampling10Percent": {
+      "recovered": 17,
+      "unresolved": 3,
+      "falseBindings": 0
+    },
+    "traceSampling1Percent": {
+      "recovered": 1,
+      "unresolved": 19,
+      "falseBindings": 0
+    },
+    "identityRedactionGlobalQPreserved": "20/20",
+    "identityRedactionBindingUnresolved": "20/20"
+  },
+  "integrity": {
+    "adapterCatalogSealedAndVersionPropagated": true,
+    "effectiveModelReconstructedBeforeCompilation": true,
+    "compiledEstimateRecomputedBeforeFreeze": true,
+    "compiledEstimateRecomputedBeforeOutcomeComparison": true,
+    "mutationTestsRejectResealedLineageAndTerminalChanges": true
+  },
+  "localAvailabilityAbsoluteDifferencePercentagePoints": {
+    "gatewayMaximum": 0.0,
+    "customersMaximum": 0.0,
+    "visitsMaximum": 0.0
+  },
+  "timingSecondsAcross40ConditionRuns": {
+    "emacPipelineMedian": 0.19972241949994896,
+    "emacPipelineMaximum": 0.2448187379999922,
+    "manualCompositeMedian": 0.06472977649997347,
+    "manualCompositeMaximum": 0.0788262119999672,
+    "scope": "Pipeline timing excludes trace collection."
+  },
+  "sourceArtifacts": {
+    "build": {
+      "name": "emac-build-inputs-33147282217-1",
+      "artifactId": "9676321839",
+      "bytes": 13679,
+      "sha256": "20f1e2b38ed884bc720aaa12e0ac504301226581f7f03e73d82844c4bf459892",
+      "expiresAt": "2026-11-26T06:14:46Z"
+    },
+    "pilot": {
+      "name": "emac-pilot-01-33147282217-1",
+      "artifactId": "9676554827",
+      "bytes": 10267984,
+      "sha256": "48970745cff0e116f464d252f5f613dadf10bad3a682fbd5bdf9dfbae58facdc",
+      "expiresAt": "2026-11-26T06:14:46Z"
+    },
+    "confirmatoryPairs": [
+      {"pair": 1, "artifactId": "9676870249", "bytes": 28309592, "sha256": "46411fd63a44125fae0c3a46355883f60aa6e58bdb36e6e881812a7715d353ff"},
+      {"pair": 2, "artifactId": "9676874193", "bytes": 28236411, "sha256": "1aa915f927b86f1d1de7d853f461c7aa8b462971e2c05882674208d24d530ec4"},
+      {"pair": 3, "artifactId": "9676879501", "bytes": 28045170, "sha256": "b84aaebff48a1cf88d3d08c343953afaf9b8f0dcbe9d9a89e7900ee5aeab20df"},
+      {"pair": 4, "artifactId": "9676873642", "bytes": 28178284, "sha256": "8fb90df4e8f99b81438cce3bf6feb35f93fb040999717823d7eccddd7accbf2c"},
+      {"pair": 5, "artifactId": "9676869267", "bytes": 28125690, "sha256": "d76bd158b1af4ed31bb44a79ed425c1b9b08dde409d2ea14984b8b233aa3886d"},
+      {"pair": 6, "artifactId": "9676872517", "bytes": 28375538, "sha256": "2019a5c2c8670dc68d128a0f30ee876522e2f77971214954bd76bf2de3648b0b"},
+      {"pair": 7, "artifactId": "9676863061", "bytes": 28252042, "sha256": "94778daf53cab7c887ba03edeceea95a3068db9ff2c4993c025d69b6eea32be3"},
+      {"pair": 8, "artifactId": "9676861592", "bytes": 28013418, "sha256": "0a4cc8e2d06bf7528505133c725753eb632773540b0160c4529d0e50999cd438"},
+      {"pair": 9, "artifactId": "9676875819", "bytes": 28195293, "sha256": "74408e967912f1a63ec81e49072330ba9d183220082e0e02e43ac4ae1c8d64ec"},
+      {"pair": 10, "artifactId": "9676870863", "bytes": 28155433, "sha256": "4823978efc4223a20df4400bdec58e7f2b152b9ec9a474473e0fcc4e311f2471"},
+      {"pair": 11, "artifactId": "9676871016", "bytes": 28232384, "sha256": "c2fc00e3e749bc39616f5408d22da52f6548fc582a1d1ece793f2817f127189a"},
+      {"pair": 12, "artifactId": "9676856759", "bytes": 28188667, "sha256": "53eac11f9864b7355559b382184db6b40de45ae06305f19ad5f77fe4ea07b091"},
+      {"pair": 13, "artifactId": "9676877668", "bytes": 28185911, "sha256": "484e994a78e9a29531b4d16f4e2a0358e767a0087bfe8cfa6c41c70a874f35c0"},
+      {"pair": 14, "artifactId": "9676873133", "bytes": 28192170, "sha256": "adbfb926d6a777ae7354335cd11f7577228699fac11bd7bd3cba950c4145522b"},
+      {"pair": 15, "artifactId": "9676870160", "bytes": 28294487, "sha256": "d0e901e1f3b4a3905dbd6ba133fcbc559eb30a2e87066a589bf77db8e9ac1ee3"},
+      {"pair": 16, "artifactId": "9676865822", "bytes": 28352777, "sha256": "f751015b55e9aee74ffa6d9fa9eedd17554b0c63ec0cd16b5892569ecba9db0e"},
+      {"pair": 17, "artifactId": "9676879416", "bytes": 28252013, "sha256": "e5832b5dc28a5be4345797e42c21a96d38593746717b1d503c27fcc0a0996648"},
+      {"pair": 18, "artifactId": "9676878187", "bytes": 28329997, "sha256": "10b3c58f0b24ca29b74f745254aa5023ad46574687f96f783f2b594c261f5a85"},
+      {"pair": 19, "artifactId": "9676855434", "bytes": 28354259, "sha256": "f17054b7d334d5bc1d3a831cf7dd778d15c43e98127178d686a21d2b44dcfe05"},
+      {"pair": 20, "artifactId": "9676879662", "bytes": 28307334, "sha256": "718f61152702c12494aadb70d9244d9841e3fd7de8f9beb00e126fc78287d43c"}
+    ],
+    "confirmatoryPairExpiration": "2026-11-26T06:14:46Z",
+    "aggregate": {
+      "name": "emac-aggregate-33147282217-1",
+      "artifactId": "9676890542",
+      "bytes": 1205,
+      "sha256": "38f6717ce98fac64136fc61f8cfa5c0155098aa51ceee3ff128710221e414226",
+      "expiresAt": "2026-11-26T06:14:46Z"
+    },
+    "detailedSummary": {
+      "name": "emac-detailed-summary-33147282217-1",
+      "artifactId": "9676924322",
+      "bytes": 5332,
+      "sha256": "8ed5a78eed9e922b026af4becc6c44ac0799eed48f1bdff0bb28bbb31a57222e",
+      "expiresAt": "2026-11-26T06:45:15Z",
+      "summaryRunId": "33149005094",
+      "summaryRunUrl": "https://github.com/a-a-k/emac-petclinic-poc/actions/runs/33149005094"
+    }
+  }
+}
