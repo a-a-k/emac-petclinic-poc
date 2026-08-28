@@ -5,3 +5,8 @@ __pycache__/
 *.pyc
 .idea/
 .vscode/
+/*.tex
+/*.bib
+/*.pdf
+/*_source.zip
+/emac-aggregate-*.zip

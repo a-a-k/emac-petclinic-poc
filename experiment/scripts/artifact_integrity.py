@@ -77,6 +77,12 @@ def _require_number(value: object, label: str) -> float:
     return float(value)
 
 
+def _require_content_version(value: object, label: str) -> str:
+    if not isinstance(value, str) or len(value) != 64:
+        raise IntegrityError(f"{label} must be a 64-character content version")
+    return value
+
+
 def file_sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -102,7 +108,7 @@ def evidence_references(evidence_dir: Path) -> list[dict[str, object]]:
 
 
 def validate_contract(contract: dict[str, object]) -> None:
-    verify_sealed_artifact(contract, "contractVersion", "emac.journey-contract/v3")
+    verify_sealed_artifact(contract, "contractVersion", "emac.journey-contract/v4")
     roles = _require_mapping(contract.get("interactionRoles"), "interactionRoles")
     journeys = _require_mapping(contract.get("journeys"), "journeys")
     if not roles or not journeys:
@@ -117,19 +123,44 @@ def validate_contract(contract: dict[str, object]) -> None:
         role_id = journey.get("suppressedInteractionRole")
         if role_id not in roles:
             raise IntegrityError(f"journey {journey_id} references unknown role {role_id!r}")
-        if not isinstance(journey.get("suppressedInteractionSatisfies"), bool):
+        if not isinstance(journey.get("fallbackSatisfiesJourney"), bool):
             raise IntegrityError(
-                f"journey {journey_id} requires suppressedInteractionSatisfies boolean"
+                f"journey {journey_id} requires fallbackSatisfiesJourney boolean"
             )
         target = _require_number(journey.get("target"), f"journeys.{journey_id}.target")
         if not 0.0 <= target <= 1.0:
             raise IntegrityError(f"journey {journey_id} target is outside [0, 1]")
 
 
+def validate_adapter_catalog(catalog: dict[str, object]) -> None:
+    verify_sealed_artifact(
+        catalog, "catalogVersion", "emac.operator-adapters/v2"
+    )
+    adapters = _require_list(catalog.get("adapters"), "adapters")
+    if not adapters:
+        raise IntegrityError("operator adapter catalog is empty")
+    seen_ids: set[str] = set()
+    for index, raw_adapter in enumerate(adapters):
+        adapter = _require_mapping(raw_adapter, f"adapters[{index}]")
+        adapter_id = str(adapter.get("id", ""))
+        if not adapter_id or adapter_id in seen_ids:
+            raise IntegrityError(f"adapter id is missing or duplicated: {adapter_id!r}")
+        seen_ids.add(adapter_id)
+        if not isinstance(adapter.get("operatorType"), str):
+            raise IntegrityError(f"adapter {adapter_id} lacks operatorType")
+        _require_mapping(adapter.get("metrics"), f"adapter {adapter_id}.metrics")
+        _require_mapping(adapter.get("labels"), f"adapter {adapter_id}.labels")
+        _require_mapping(adapter.get("semantics"), f"adapter {adapter_id}.semantics")
+
+
 def validate_bootstrap_model(model: dict[str, object]) -> None:
     verify_sealed_artifact(
-        model, "modelVersion", "emac.discovered-interaction-model/v2"
+        model, "modelVersion", "emac.discovered-interaction-model/v3"
     )
+    _require_content_version(model.get("catalogVersion"), "catalogVersion")
+    _require_content_version(model.get("contractVersion"), "contractVersion")
+    if not isinstance(model.get("contractId"), str) or not model.get("contractId"):
+        raise IntegrityError("bootstrap model requires contractId")
     _require_list(model.get("instances"), "instances")
     _require_list(model.get("interactions"), "interactions")
     _require_list(model.get("operators"), "operators")
@@ -178,11 +209,14 @@ def validate_binding_against_interactions(
 def validate_candidate_delta(
     delta: dict[str, object], base_model: dict[str, object] | None = None
 ) -> None:
-    verify_sealed_artifact(delta, "deltaVersion", "emac.candidate-model-delta/v2")
+    verify_sealed_artifact(delta, "deltaVersion", "emac.candidate-model-delta/v3")
+    _require_content_version(delta.get("catalogVersion"), "catalogVersion")
     if base_model is not None:
         validate_bootstrap_model(base_model)
         if delta.get("baseModelVersion") != base_model.get("modelVersion"):
             raise IntegrityError("candidate delta targets a different bootstrap model")
+        if delta.get("catalogVersion") != base_model.get("catalogVersion"):
+            raise IntegrityError("candidate delta uses a different adapter catalog")
     runtime = _require_mapping(delta.get("runtimeParameters"), "runtimeParameters")
     _validate_runtime_parameters(runtime)
     graph = _require_mapping(delta.get("observedTraceGraph"), "observedTraceGraph")
@@ -227,13 +261,15 @@ def validate_reconciliation(
     candidate_delta: dict[str, object],
 ) -> None:
     verify_sealed_artifact(
-        reconciliation, "reconciliationVersion", "emac.reconciliation-decision/v1"
+        reconciliation, "reconciliationVersion", "emac.reconciliation-decision/v2"
     )
     validate_candidate_delta(candidate_delta, base_model)
     if reconciliation.get("baseModelVersion") != base_model.get("modelVersion"):
         raise IntegrityError("reconciliation targets a different bootstrap model")
     if reconciliation.get("candidateDeltaVersion") != candidate_delta.get("deltaVersion"):
         raise IntegrityError("reconciliation targets a different candidate delta")
+    if reconciliation.get("catalogVersion") != candidate_delta.get("catalogVersion"):
+        raise IntegrityError("reconciliation uses a different adapter catalog")
     if reconciliation.get("status") not in {"identified", "unresolved", "contradictory"}:
         raise IntegrityError("invalid reconciliation status")
     admitted = _require_list(reconciliation.get("admittedFields"), "admittedFields")
@@ -249,7 +285,11 @@ def validate_reconciliation(
 
 
 def validate_effective_model(model: dict[str, object]) -> None:
-    verify_sealed_artifact(model, "modelVersion", "emac.effective-interaction-model/v2")
+    verify_sealed_artifact(model, "modelVersion", "emac.effective-interaction-model/v3")
+    _require_content_version(model.get("catalogVersion"), "catalogVersion")
+    _require_content_version(model.get("contractVersion"), "contractVersion")
+    if not isinstance(model.get("contractId"), str) or not model.get("contractId"):
+        raise IntegrityError("effective model requires contractId")
     status = model.get("reconciliationStatus")
     if status not in {"identified", "unresolved", "contradictory"}:
         raise IntegrityError("effective model lacks a valid reconciliationStatus")

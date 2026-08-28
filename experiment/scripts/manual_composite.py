@@ -61,9 +61,9 @@ def evaluate(
     a_visits = counts["permittedSuccessful"] / counts["permitted"]
     estimates = {}
     for journey_id, declaration in contract["journeys"].items():
-        a_suppressed = 1.0 if declaration["suppressedInteractionSatisfies"] else 0.0
+        a_fallback = 1.0 if declaration["fallbackSatisfiesJourney"] else 0.0
         estimates[journey_id] = a_prefix * (
-            q * a_visits + (1.0 - q * a_visits) * a_suppressed
+            q * a_visits + (1.0 - q * a_visits) * a_fallback
         )
     return {
         "schemaVersion": "emac.manual-dynamic-composite/v1",

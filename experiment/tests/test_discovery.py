@@ -14,10 +14,14 @@ EXPERIMENT = Path(__file__).resolve().parents[1]
 SCRIPTS = EXPERIMENT / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
-from apply_model_delta import apply_delta  # noqa: E402
-from artifact_integrity import IntegrityError, seal_artifact  # noqa: E402
+from apply_model_delta import apply_delta, validate_effective_lineage  # noqa: E402
+from artifact_integrity import (  # noqa: E402
+    IntegrityError,
+    seal_artifact,
+    validate_adapter_catalog,
+)
 from collect_trace_evidence import collect, normalize_trace  # noqa: E402
-from compile_journeys import compile_estimates  # noqa: E402
+from compile_journeys import compile_estimates, validate_compiled_estimates  # noqa: E402
 from discover_model import discover_bootstrap, discover_delta, trace_graph  # noqa: E402
 from evidence_ablations import evaluate as evaluate_ablations  # noqa: E402
 from evidence import (  # noqa: E402
@@ -403,7 +407,9 @@ class DiscoveryTests(unittest.TestCase):
             reconciliation = reconcile(base, delta)
             self.assertEqual(reconciliation["status"], "identified")
             effective = apply_delta(base, delta, reconciliation)
+            validate_effective_lineage(effective, base, delta, reconciliation)
             compiled = compile_estimates(effective, self.contract)
+            validate_compiled_estimates(compiled, effective, self.contract)
             self.assertEqual(compiled["status"], "ASSESSED")
             self.assertAlmostEqual(
                 compiled["estimates"]["owner-history"]["modelDiscoveredEstimate"], 0.99
@@ -441,6 +447,50 @@ class DiscoveryTests(unittest.TestCase):
             tampered_effective["runtimeReliability"]["q"] = 0.5
             with self.assertRaises(IntegrityError):
                 compile_estimates(tampered_effective, self.contract)
+
+            resealed_effective = copy.deepcopy(effective)
+            resealed_effective["runtimeReliability"].update(
+                {
+                    "permitted": 5000,
+                    "permittedSuccessful": 5000,
+                    "notPermitted": 5000,
+                    "q": 0.5,
+                    "A_V": 1.0,
+                }
+            )
+            resealed_effective = seal_artifact(resealed_effective, "modelVersion")
+            self.assertAlmostEqual(
+                compile_estimates(resealed_effective, self.contract)["estimates"]
+                ["owner-history"]["modelDiscoveredEstimate"],
+                0.5,
+            )
+            with self.assertRaises(IntegrityError):
+                validate_effective_lineage(
+                    resealed_effective, base, delta, reconciliation
+                )
+
+            tampered_compiled = copy.deepcopy(compiled)
+            tampered_compiled["estimates"]["owner-history"][
+                "modelDiscoveredEstimate"
+            ] = 0.5
+            with self.assertRaises(IntegrityError):
+                validate_compiled_estimates(
+                    tampered_compiled, effective, self.contract
+                )
+
+            resealed_compiled = seal_artifact(
+                tampered_compiled, "compilationVersion"
+            )
+            with self.assertRaises(IntegrityError):
+                validate_compiled_estimates(
+                    resealed_compiled, effective, self.contract
+                )
+
+            catalog = json.loads(self.adapters_path.read_text(encoding="utf-8"))
+            validate_adapter_catalog(catalog)
+            catalog["adapters"][0]["semantics"]["openState"] = "MUTATED"
+            with self.assertRaises(IntegrityError):
+                validate_adapter_catalog(catalog)
 
             wrong_edge_model = copy.deepcopy(effective)
             customers_edge = next(

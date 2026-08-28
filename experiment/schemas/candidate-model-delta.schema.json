@@ -1,12 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://emac.example/schemas/candidate-model-delta.schema.json",
-  "title": "EmaC candidate model delta v2",
+  "title": "EmaC candidate model delta v3",
   "type": "object",
   "required": [
     "schemaVersion",
     "deltaVersion",
     "baseModelVersion",
+    "catalogVersion",
     "selectedOperator",
     "stateChanges",
     "bindings",
@@ -17,9 +18,10 @@
     "evidenceRefs"
   ],
   "properties": {
-    "schemaVersion": {"const": "emac.candidate-model-delta/v2"},
+    "schemaVersion": {"const": "emac.candidate-model-delta/v3"},
     "deltaVersion": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "baseModelVersion": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "catalogVersion": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "stateChanges": {"type": "array"},
     "bindings": {"type": "array"},
     "runtimeParameters": {"type": "object"},

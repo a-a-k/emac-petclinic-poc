@@ -10,6 +10,7 @@ from pathlib import Path
 
 from artifact_integrity import (
     DELTA_APPLICATION_FIELDS,
+    IntegrityError,
     seal_artifact,
     validate_effective_model,
     validate_reconciliation,
@@ -27,7 +28,7 @@ def apply_delta(
     validate_reconciliation(reconciliation, base, delta)
     effective = copy.deepcopy(base)
     effective.pop("modelVersion", None)
-    effective["schemaVersion"] = "emac.effective-interaction-model/v2"
+    effective["schemaVersion"] = "emac.effective-interaction-model/v3"
     effective["parentModelVersion"] = base["modelVersion"]
     effective["candidateDeltaVersion"] = delta["deltaVersion"]
     effective["reconciliationVersion"] = reconciliation["reconciliationVersion"]
@@ -81,6 +82,21 @@ def apply_delta(
     result = seal_artifact(effective, "modelVersion")
     validate_effective_model(result)
     return result
+
+
+def validate_effective_lineage(
+    effective: dict[str, object],
+    base: dict[str, object],
+    delta: dict[str, object],
+    reconciliation: dict[str, object],
+) -> None:
+    """Require the effective model to equal deterministic source-artifact application."""
+    validate_effective_model(effective)
+    expected = apply_delta(base, delta, reconciliation)
+    if effective != expected:
+        raise IntegrityError(
+            "effective model is not the deterministic application of its declared lineage"
+        )
 
 
 def main() -> None:

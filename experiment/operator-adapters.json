@@ -1,5 +1,6 @@
 {
-  "schemaVersion": "emac.operator-adapters/v1",
+  "schemaVersion": "emac.operator-adapters/v2",
+  "catalogVersion": "e7b22157b5b0e6abf7c151046750d0d9740a96f236215fd8a87c0f39783a979b",
   "adapters": [
     {
       "id": "resilience4j-circuitbreaker-v1",

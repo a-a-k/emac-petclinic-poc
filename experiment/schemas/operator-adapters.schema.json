@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://emac.example/schemas/operator-adapters.schema.json",
+  "title": "EmaC operator adapter catalog v2",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "catalogVersion",
+    "adapters"
+  ],
+  "properties": {
+    "schemaVersion": {"const": "emac.operator-adapters/v2"},
+    "catalogVersion": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "adapters": {"type": "array", "minItems": 1}
+  }
+}

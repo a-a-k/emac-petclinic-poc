@@ -7,11 +7,14 @@ import argparse
 import json
 from pathlib import Path
 
+from apply_model_delta import validate_effective_lineage
 from artifact_integrity import (
+    IntegrityError,
     binding_matches_role,
     seal_artifact,
     validate_contract,
     validate_effective_model,
+    verify_sealed_artifact,
 )
 
 def read_json(path: Path) -> dict[str, object]:
@@ -27,6 +30,10 @@ def compile_estimates(
 ) -> dict[str, object]:
     validate_effective_model(effective_model)
     validate_contract(contract)
+    if effective_model["contractId"] != contract["contractId"]:
+        raise IntegrityError("effective model belongs to a different journey contract")
+    if effective_model["contractVersion"] != contract["contractVersion"]:
+        raise IntegrityError("effective model uses a different journey contract version")
     estimates: dict[str, object] = {}
     if effective_model["reconciliationStatus"] != "identified":
         reason = f"model-{effective_model['reconciliationStatus']}"
@@ -38,15 +45,17 @@ def compile_estimates(
                 "requiredInteractionRole": declaration["suppressedInteractionRole"],
             }
         artifact = {
-            "schemaVersion": "emac.compiled-journey-estimates/v2",
+            "schemaVersion": "emac.compiled-journey-estimates/v3",
             "status": "UNASSESSABLE",
             "effectiveModelVersion": effective_model["modelVersion"],
             "reconciliationVersion": effective_model["reconciliationVersion"],
+            "catalogVersion": effective_model["catalogVersion"],
             "contractId": contract["contractId"],
             "contractVersion": contract["contractVersion"],
             "estimates": estimates,
             "inputPolicy": {
-                "lineageVerified": True,
+                "effectiveModelContentHashVerified": True,
+                "contractContentHashVerified": True,
                 "rawMetricsRead": False,
                 "rawTracesRead": False,
                 "responseBodyRead": False,
@@ -79,11 +88,11 @@ def compile_estimates(
                 "matchingBindingCount": len(matching_bindings),
             }
             continue
-        a_suppressed = 1.0 if declaration["suppressedInteractionSatisfies"] else 0.0
+        a_fallback = 1.0 if declaration["fallbackSatisfiesJourney"] else 0.0
         discovered = a_prefix * (
-            q * a_visits + (1.0 - q * a_visits) * a_suppressed
+            q * a_visits + (1.0 - q * a_visits) * a_fallback
         )
-        frozen = a_prefix * (a_visits + (1.0 - a_visits) * a_suppressed)
+        frozen = a_prefix * (a_visits + (1.0 - a_visits) * a_fallback)
         target = float(declaration["target"])
         estimates[journey_id] = {
             "assessmentStatus": "ASSESSED",
@@ -92,9 +101,7 @@ def compile_estimates(
             "semanticBinding": (
                 matching_bindings[0]["affectedEdge"] if matching_bindings else None
             ),
-            "suppressedInteractionSatisfies": declaration[
-                "suppressedInteractionSatisfies"
-            ],
+            "fallbackSatisfiesJourney": declaration["fallbackSatisfiesJourney"],
             "modelDiscoveredEstimate": discovered,
             "frozenModelEstimate": frozen,
             "modelDiscoveredTargetSide": target_side(discovered, target),
@@ -102,16 +109,18 @@ def compile_estimates(
         }
 
     artifact = {
-        "schemaVersion": "emac.compiled-journey-estimates/v2",
+        "schemaVersion": "emac.compiled-journey-estimates/v3",
         "status": "ASSESSED" if all_assessed else "UNASSESSABLE",
         "effectiveModelVersion": effective_model["modelVersion"],
         "reconciliationVersion": effective_model["reconciliationVersion"],
+        "catalogVersion": effective_model["catalogVersion"],
         "contractId": contract["contractId"],
         "contractVersion": contract["contractVersion"],
         "estimates": estimates,
         "runtimeParametersFromEffectiveModel": runtime,
         "inputPolicy": {
-            "lineageVerified": True,
+            "effectiveModelContentHashVerified": True,
+            "contractContentHashVerified": True,
             "rawMetricsRead": False,
             "rawTracesRead": False,
             "responseBodyRead": False,
@@ -121,13 +130,41 @@ def compile_estimates(
     return seal_artifact(artifact, "compilationVersion")
 
 
+def validate_compiled_estimates(
+    compiled: dict[str, object],
+    effective_model: dict[str, object],
+    contract: dict[str, object],
+) -> None:
+    """Verify terminal sealing, input lineage, and exact compilation semantics."""
+    verify_sealed_artifact(
+        compiled,
+        "compilationVersion",
+        "emac.compiled-journey-estimates/v3",
+    )
+    expected = compile_estimates(effective_model, contract)
+    if compiled != expected:
+        raise IntegrityError(
+            "compiled estimates do not match the declared effective model and contract"
+        )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--base-model", type=Path, required=True)
+    parser.add_argument("--candidate-delta", type=Path, required=True)
+    parser.add_argument("--reconciliation", type=Path, required=True)
     parser.add_argument("--effective-model", type=Path, required=True)
     parser.add_argument("--contract", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    result = compile_estimates(read_json(args.effective_model), read_json(args.contract))
+    base = read_json(args.base_model)
+    candidate = read_json(args.candidate_delta)
+    reconciliation = read_json(args.reconciliation)
+    effective = read_json(args.effective_model)
+    contract = read_json(args.contract)
+    validate_effective_lineage(effective, base, candidate, reconciliation)
+    result = compile_estimates(effective, contract)
+    validate_compiled_estimates(result, effective, contract)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 

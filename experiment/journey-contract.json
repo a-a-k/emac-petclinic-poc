@@ -1,6 +1,6 @@
 {
-  "schemaVersion": "emac.journey-contract/v3",
-  "contractVersion": "cfcf11ec618af4c280c8ebe1ac68f43ef1d6e2e07466031b0d218d3ee8f030a2",
+  "schemaVersion": "emac.journey-contract/v4",
+  "contractVersion": "26652442a432ab05383abd90c9c2a7985e99ed881ee692d3eeeaf3963936dfde",
   "contractId": "petclinic-owner-details",
   "entrypoint": {
     "serviceName": "api-gateway",
@@ -21,17 +21,17 @@
     "owner-history": {
       "target": 0.995,
       "suppressedInteractionRole": "visit-history-branch",
-      "suppressedInteractionSatisfies": false
+      "fallbackSatisfiesJourney": false
     },
     "owner-only": {
       "target": 0.995,
       "suppressedInteractionRole": "visit-history-branch",
-      "suppressedInteractionSatisfies": true
+      "fallbackSatisfiesJourney": true
     }
   },
   "scope": [
     "The contract declares user intent, not the service topology.",
     "A semantic interaction role is declared by an operation predicate; its runtime service edge and instance binding are discovered.",
-    "Whether a suppressed interaction satisfies a journey is requirements knowledge and is not inferred from telemetry."
+    "Whether the fallback satisfies a journey is requirements knowledge and is not inferred from telemetry."
   ]
 }

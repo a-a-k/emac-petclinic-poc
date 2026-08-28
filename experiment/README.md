@@ -10,13 +10,16 @@
 
 The PoC does not claim arbitrary architecture discovery, discovery of user
 intent, adaptation, certification, or support for operator classes other than
-the declared generic Resilience4j adapter.
+the declared generic Resilience4j adapter. It does not replace a content-aware
+journey SLI, which can observe the property directly, and it does not compare
+against sparse semantic probes. It assesses from component/operator evidence
+before held-out journey outcomes are available.
 
 ## Declared versus discovered
 
 The EmaC input contract declares the journey entrypoint and target, a semantic
-interaction role expressed as an operation predicate, and whether suppression of
-that role satisfies each journey. It does not declare which runtime service edge
+interaction role expressed as an operation predicate, and whether the fallback
+used after either a rejected or failed primary call satisfies each journey. It does not declare which runtime service edge
 will satisfy the role. The generic adapter catalog declares Resilience4j metric
 syntax and circuit-breaker semantics.
 
@@ -50,16 +53,22 @@ restart telemetry and both gateways
   -> discover candidate typed operator-state/edge-binding delta
   -> reconcile as identified, unresolved, or contradictory
   -> apply only an identified delta to v0, producing effective-model v1
+  -> reconstruct v1 from v0 + delta + reconciliation and require exact equality
   -> compile journey estimates only from v1 + journey contract
-  -> freeze model/estimate versions
+  -> recompute and validate the sealed terminal estimate
+  -> freeze catalog/model/estimate versions and integrity-gate results
   -> send new held-out requests and evaluate response semantics
 ```
 
-The compiler implementation reads only `effective-model.json` and
-`journey-contract.json`; filesystem-level process isolation is not claimed. Every
-stage recomputes the complete content hash of its inputs before use. The effective
-model records its parent, candidate delta, and reconciliation versions; the
-compiled estimate records both the effective-model and contract versions.
+The pure compilation function reads only `effective-model.json` and
+`journey-contract.json`; filesystem-level process isolation is not claimed. Its
+production entry point first reconstructs the effective model from the sealed
+bootstrap model, candidate delta, and reconciliation decision and requires exact
+equality. Every stage recomputes the complete content hash of its inputs before
+use. The sealed adapter-catalog version is carried through bootstrap, delta,
+reconciliation, effective model, compiled estimate, and freeze. The terminal
+estimate is independently recomputed before freeze and again before outcome
+comparison.
 
 ## Discovery rule
 
@@ -131,13 +140,14 @@ q   = permitted decisions / all operator decisions
 A_V = successful permitted decisions / permitted decisions
 ```
 
-For a journey with suppressed-branch semantic value `A_S`:
+For a journey with fallback semantic value `A_F`, applied after either a rejected
+call or a failed permitted call:
 
 ```text
-R_J = A_P [q A_V + (1 - q A_V) A_S]
+R_J = A_P [q A_V + (1 - q A_V) A_F]
 ```
 
-`owner-history` declares `A_S=0`; `owner-only` declares `A_S=1`. The held-out
+`owner-history` declares `A_F=0`; `owner-only` declares `A_F=1`. The held-out
 oracle separately checks owner `6` and visit `1` after the estimate has frozen.
 
 ## Randomization and anti-hardcoding

@@ -1,13 +1,14 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://emac.example/schemas/reconciliation-decision.schema.json",
-  "title": "EmaC reconciliation decision v1",
+  "title": "EmaC reconciliation decision v2",
   "type": "object",
   "required": [
     "schemaVersion",
     "reconciliationVersion",
     "baseModelVersion",
     "candidateDeltaVersion",
+    "catalogVersion",
     "status",
     "reasons",
     "admittedFields",
@@ -16,10 +17,11 @@
     "evidenceRefs"
   ],
   "properties": {
-    "schemaVersion": {"const": "emac.reconciliation-decision/v1"},
+    "schemaVersion": {"const": "emac.reconciliation-decision/v2"},
     "reconciliationVersion": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "baseModelVersion": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "candidateDeltaVersion": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "catalogVersion": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "status": {"enum": ["identified", "unresolved", "contradictory"]},
     "reasons": {"type": "array", "items": {"type": "string"}},
     "admittedFields": {"type": "array", "items": {"type": "string"}},

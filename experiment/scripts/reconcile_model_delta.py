@@ -64,9 +64,10 @@ def reconcile(
     admitted = list(DELTA_APPLICATION_FIELDS) if status == "identified" else []
     rejected = [] if status == "identified" else list(DELTA_APPLICATION_FIELDS)
     artifact = {
-        "schemaVersion": "emac.reconciliation-decision/v1",
+        "schemaVersion": "emac.reconciliation-decision/v2",
         "baseModelVersion": base_model["modelVersion"],
         "candidateDeltaVersion": candidate_delta["deltaVersion"],
+        "catalogVersion": candidate_delta["catalogVersion"],
         "status": status,
         "reasons": reasons,
         "admittedFields": admitted,

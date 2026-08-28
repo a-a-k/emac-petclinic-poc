@@ -21,7 +21,9 @@ from collections import Counter
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from pathlib import Path
 
+from apply_model_delta import validate_effective_lineage
 from collect_trace_evidence import collect as collect_traces
+from compile_journeys import validate_compiled_estimates
 from evidence import (
     circuitbreaker_counts,
     circuitbreaker_state,
@@ -507,8 +509,9 @@ def run_bootstrap(
     write_json(
         condition_dir / "model" / "bootstrap-freeze.json",
         {
-            "schemaVersion": "emac.bootstrap-freeze/v2",
+            "schemaVersion": "emac.bootstrap-freeze/v3",
             "modelVersion": model["modelVersion"],
+            "catalogVersion": model["catalogVersion"],
             "discoverySeconds": timings["discoverySeconds"],
             "frozenAtUnixNs": frozen_ns,
         },
@@ -676,6 +679,12 @@ def run_discovery_pipeline(
     )
     timings["compilationSeconds"] = run_script(
         "compile_journeys.py",
+        "--base-model",
+        str(bootstrap_model_path),
+        "--candidate-delta",
+        str(delta_path),
+        "--reconciliation",
+        str(reconciliation_path),
         "--effective-model",
         str(effective_path),
         "--contract",
@@ -701,6 +710,10 @@ def run_discovery_pipeline(
     effective = read_json(effective_path)
     compiled = read_json(compiled_path)
     manual = read_json(manual_path)
+    base = read_json(bootstrap_model_path)
+    contract = read_json(CONTRACT_PATH)
+    validate_effective_lineage(effective, base, delta, reconciliation)
+    validate_compiled_estimates(compiled, effective, contract)
     timings["emacPipelineSeconds"] = sum(
         timings[key]
         for key in (
@@ -716,13 +729,18 @@ def run_discovery_pipeline(
     )
     freeze_ns = time.time_ns()
     freeze = {
-        "schemaVersion": "emac.pre-outcome-freeze/v4",
-        "bootstrapModelVersion": read_json(bootstrap_model_path)["modelVersion"],
+        "schemaVersion": "emac.pre-outcome-freeze/v5",
+        "bootstrapModelVersion": base["modelVersion"],
+        "catalogVersion": base["catalogVersion"],
         "deltaVersion": delta["deltaVersion"],
         "reconciliationVersion": reconciliation["reconciliationVersion"],
         "reconciliationStatus": reconciliation["status"],
         "effectiveModelVersion": effective["modelVersion"],
         "compilationVersion": compiled["compilationVersion"],
+        "integrityGate": {
+            "effectiveModelReconstructedFromLineage": True,
+            "compiledEstimatesRecomputed": True,
+        },
         "pipelineTiming": timings,
         "frozenAtUnixNs": freeze_ns,
     }
@@ -825,12 +843,15 @@ def condition_validity(
     )
     chain_valid = (
         delta["baseModelVersion"] == bootstrap["modelVersion"]
+        and delta["catalogVersion"] == bootstrap["catalogVersion"]
         and effective["parentModelVersion"] == bootstrap["modelVersion"]
+        and effective["catalogVersion"] == bootstrap["catalogVersion"]
         and effective["candidateDeltaVersion"] == delta["deltaVersion"]
         and effective["appliedDeltaVersion"] == delta["deltaVersion"]
         and effective["reconciliationStatus"] == "identified"
         and compiled["effectiveModelVersion"] == effective["modelVersion"]
         and compiled["reconciliationVersion"] == effective["reconciliationVersion"]
+        and compiled["catalogVersion"] == effective["catalogVersion"]
         and compiled["status"] == "ASSESSED"
     )
     trace_query = delta["observedTraceGraph"]["query"]
@@ -951,6 +972,14 @@ def run_condition(
         read_json(ORACLE_PATH),
     )
     elapsed_open = time.monotonic() - post_precondition
+
+    validate_effective_lineage(
+        effective,
+        read_json(bootstrap_path),
+        delta,
+        read_json(condition_dir / "model" / "reconciliation.json"),
+    )
+    validate_compiled_estimates(compiled, effective, contract)
 
     comparison: dict[str, object] = {}
     for journey_id in contract["journeys"]:

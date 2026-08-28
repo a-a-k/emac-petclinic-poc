@@ -10,6 +10,7 @@ from pathlib import Path
 from artifact_integrity import (
     evidence_references,
     seal_artifact,
+    validate_adapter_catalog,
     validate_bootstrap_model,
     validate_contract,
 )
@@ -26,12 +27,14 @@ def read_json(path: Path) -> dict[str, object]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def load_adapters(path: Path) -> list[dict[str, object]]:
+def load_adapter_catalog(path: Path) -> dict[str, object]:
     payload = read_json(path)
-    adapters = payload.get("adapters", [])
-    if not adapters:
-        raise ValueError("operator adapter catalog is empty")
-    return adapters
+    validate_adapter_catalog(payload)
+    return payload
+
+
+def load_adapters(path: Path) -> list[dict[str, object]]:
+    return load_adapter_catalog(path)["adapters"]
 
 
 def metric_observations(
@@ -143,7 +146,8 @@ def discover_bootstrap(
 ) -> dict[str, object]:
     contract = read_json(contract_path)
     validate_contract(contract)
-    adapters = load_adapters(adapters_path)
+    catalog = load_adapter_catalog(adapters_path)
+    adapters = catalog["adapters"]
     operators = metric_observations(evidence_dir, adapters)
     graph = trace_graph(evidence_dir)
     instances = sorted(
@@ -157,10 +161,11 @@ def discover_bootstrap(
         }
     )
     artifact = {
-        "schemaVersion": "emac.discovered-interaction-model/v2",
+        "schemaVersion": "emac.discovered-interaction-model/v3",
         "discoveryMode": "bootstrap-runtime-evidence",
         "contractId": contract["contractId"],
         "contractVersion": contract["contractVersion"],
+        "catalogVersion": catalog["catalogVersion"],
         "instances": [
             {"serviceName": service, "serviceInstanceId": instance}
             for service, instance in instances
@@ -305,7 +310,10 @@ def discover_delta(
 ) -> dict[str, object]:
     base_model = read_json(base_model_path)
     validate_bootstrap_model(base_model)
-    adapters = load_adapters(adapters_path)
+    catalog = load_adapter_catalog(adapters_path)
+    if catalog["catalogVersion"] != base_model["catalogVersion"]:
+        raise ValueError("adapter catalog differs from the bootstrap model lineage")
+    adapters = catalog["adapters"]
     observations = metric_observations(evidence_dir, adapters)
     graph = trace_graph(evidence_dir)
     load = read_json(evidence_dir / "load-summary.json")
@@ -358,8 +366,9 @@ def discover_delta(
         "A_V": counts["permittedSuccessful"] / counts["permitted"],
     }
     artifact = {
-        "schemaVersion": "emac.candidate-model-delta/v2",
+        "schemaVersion": "emac.candidate-model-delta/v3",
         "baseModelVersion": base_model["modelVersion"],
+        "catalogVersion": catalog["catalogVersion"],
         "selectedOperator": selected_operator,
         "stateChanges": state_changes,
         "bindings": bindings,

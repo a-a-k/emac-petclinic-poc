@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://emac.example/schemas/journey-contract.schema.json",
-  "title": "EmaC journey contract v3",
+  "title": "EmaC journey contract v4",
   "type": "object",
   "required": [
     "schemaVersion",
@@ -12,7 +12,7 @@
     "journeys"
   ],
   "properties": {
-    "schemaVersion": {"const": "emac.journey-contract/v3"},
+    "schemaVersion": {"const": "emac.journey-contract/v4"},
     "contractVersion": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "contractId": {"type": "string", "minLength": 1},
     "entrypoint": {"type": "object"},
@@ -36,11 +36,11 @@
       "minProperties": 1,
       "additionalProperties": {
         "type": "object",
-        "required": ["target", "suppressedInteractionRole", "suppressedInteractionSatisfies"],
+        "required": ["target", "suppressedInteractionRole", "fallbackSatisfiesJourney"],
         "properties": {
           "target": {"type": "number", "minimum": 0, "maximum": 1},
           "suppressedInteractionRole": {"type": "string", "minLength": 1},
-          "suppressedInteractionSatisfies": {"type": "boolean"}
+          "fallbackSatisfiesJourney": {"type": "boolean"}
         }
       }
     }

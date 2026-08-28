@@ -11,9 +11,9 @@ import tempfile
 from pathlib import Path
 from typing import Callable
 
-from apply_model_delta import apply_delta
+from apply_model_delta import apply_delta, validate_effective_lineage
 from artifact_integrity import seal_artifact
-from compile_journeys import compile_estimates
+from compile_journeys import compile_estimates, validate_compiled_estimates
 from discover_model import discover_delta
 from reconcile_model_delta import reconcile
 
@@ -145,7 +145,10 @@ def _production_replay(
         )
         decision = reconcile(base_model, candidate)
         effective = apply_delta(base_model, candidate, decision)
-        compiled = compile_estimates(effective, read_json(contract_path))
+        contract = read_json(contract_path)
+        validate_effective_lineage(effective, base_model, candidate, decision)
+        compiled = compile_estimates(effective, contract)
+        validate_compiled_estimates(compiled, effective, contract)
 
     audit = candidate["discoveryAudit"]["operatorEdgeBindings"][0]
     matching = [
