@@ -95,6 +95,13 @@ def rate_binding(
     tolerance_fraction: float,
     minimum_instance_traces: int = 3,
 ) -> dict[str, object]:
+    if full_delta["selectedOperator"] is None:
+        return {
+            "status": "unresolved",
+            "reason": "primary-operator-unidentified",
+            "binding": None,
+            "falseBinding": False,
+        }
     rejected = [
         row
         for row in full_delta["observedOperators"]

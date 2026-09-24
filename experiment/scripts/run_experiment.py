@@ -24,6 +24,7 @@ from pathlib import Path
 from apply_model_delta import validate_effective_lineage
 from collect_trace_evidence import collect as collect_traces
 from compile_journeys import validate_compiled_estimates
+from discover_model import load_adapters, metric_observations
 from evidence import (
     circuitbreaker_counts,
     circuitbreaker_state,
@@ -810,14 +811,18 @@ def condition_validity(
     outcome_route_expected = expected_routing(
         int(outcome["requested"]), str(assignment["minoritySlot"])
     )
-    observations = delta["observedOperators"]
-    selected = str(delta["selectedOperator"])
+    # These checks run after freeze, using the evaluator's known intervention
+    # and raw observations. Discovery output never determines eligibility.
+    evidence_dir = Path(evidence_load["snapshotDir"]).parent
+    observations = metric_observations(evidence_dir, load_adapters(ADAPTERS_PATH))
+    selected = str(read_json(MANUAL_COMPOSITE_PATH)["operatorName"])
     zero_timeouts = True
     for source in SLOT_METRIC_SOURCES.values():
         start = load_snapshot(Path(evidence_load["snapshotDir"]) / f"{source}.start.prom")
         end = load_snapshot(Path(evidence_load["snapshotDir"]) / f"{source}.end.prom")
         zero_timeouts = zero_timeouts and timelimiter_timeouts(start, end, selected) == 0
-    trace_rows = delta["observedTraceGraph"]["byInstance"]
+    observed_traces = read_json(evidence_dir / "traces.normalized.json")
+    trace_rows = observed_traces["byInstance"]
     counts_by_instance = {
         row["serviceInstanceId"]: int(row["counts"]["decisions"])
         for row in observations
@@ -854,7 +859,7 @@ def condition_validity(
         and compiled["catalogVersion"] == effective["catalogVersion"]
         and compiled["status"] == "ASSESSED"
     )
-    trace_query = delta["observedTraceGraph"]["query"]
+    trace_query = observed_traces["query"]
     checks = {
         "bootstrapFrozenBeforeManipulation": bootstrap_frozen_ns < manipulation_started_ns,
         "cleanGatewayResetAfterBootstrap": (
@@ -863,22 +868,30 @@ def condition_validity(
         "manipulationState": gateway["finalState"] == expected_state,
         "preconditionDecisions": gateway["decisions"] == protocol["preconditioning"]["requests"],
         "visitsHealthyAfterFault": manipulation["visitsAfterFaultDisabled"]["healthy"],
-        "opaqueIdentitiesDiscovered": discovered_identities == identities,
-        "logicalSlotNamesAbsentFromModel": "gateway-A" not in json.dumps(bootstrap) and "gateway-B" not in json.dumps(bootstrap),
         "exactRouting": evidence_load["byGatewaySlot"] == route_expected,
         "exactOutcomeRouting": outcome["byGatewaySlot"] == outcome_route_expected,
         "allEvidenceRequestsCompleted": evidence_load["completed"] == evidence_load["requested"],
         "allOutcomeRequestsCompleted": outcome["completed"] == outcome["requested"],
         "breakerOpenBudget": elapsed_open_seconds < protocol["measurement"]["breakerOpenBudgetSeconds"],
         "zeroTimeLimiterTimeouts": zero_timeouts,
-        "counterDenominatorMatchesEligible": delta["runtimeParameters"]["decisions"] == evidence_load["requested"],
-        "traceCoverageAtLeastMinimum": all(value >= minimum_coverage for value in trace_coverage.values()),
+        "counterDenominatorMatchesEligible": (
+            set(counts_by_instance) == identities
+            and sum(counts_by_instance.values()) == evidence_load["requested"]
+        ),
+        "traceCoverageAtLeastMinimum": (
+            set(trace_coverage) == identities
+            and all(value >= minimum_coverage for value in trace_coverage.values())
+        ),
         "traceRunIdFilterEnforced": (
             trace_query.get("runIdFilterEnforced") is True
             and trace_query.get("expectedRunId") == evidence_load["runId"]
         ),
-        "modelApplicationChain": chain_valid,
         "freezePrecedesOutcome": freeze_ns < outcome_started_ns,
+    }
+    method_checks = {
+        "opaqueIdentitiesDiscovered": discovered_identities == identities,
+        "logicalSlotNamesAbsentFromModel": "gateway-A" not in json.dumps(bootstrap) and "gateway-B" not in json.dumps(bootstrap),
+        "modelApplicationChain": chain_valid,
     }
     if condition == "treatment":
         checks.update(
@@ -889,10 +902,12 @@ def condition_validity(
                     and gateway["notPermitted"]
                     == protocol["preconditioning"]["expectedTreatmentNotPermittedCalls"]
                 ),
-                "exactStateDeltaRecovery": treatment_delta,
-                "uniqueOperatorEdgeBindingRecovery": treatment_binding,
             }
         )
+        method_checks.update({
+            "exactStateDeltaRecovery": treatment_delta,
+            "uniqueOperatorEdgeBindingRecovery": treatment_binding,
+        })
     else:
         checks.update(
             {
@@ -900,11 +915,49 @@ def condition_validity(
                     gateway["permittedSuccessful"] == protocol["preconditioning"]["requests"]
                     and gateway["notPermitted"] == 0
                 ),
-                "noFalseStateDelta": not delta["stateChanges"],
-                "noFalseOperatorEdgeBinding": not delta["bindings"],
             }
         )
-    return {"valid": all(checks.values()), "checks": checks, "traceCoverage": trace_coverage}
+        method_checks.update({
+            "noFalseStateDelta": not delta["stateChanges"],
+            "noFalseOperatorEdgeBinding": not delta["bindings"],
+        })
+    return {
+        "valid": all(checks.values()),
+        "checks": checks,
+        "methodChecks": method_checks,
+        "traceCoverage": trace_coverage,
+        "policy": "measurement-and-intervention-only/v1",
+    }
+
+
+def compare_assessments(
+    compiled: dict[str, object],
+    manual: dict[str, object],
+    outcome: dict[str, object],
+    contract: dict[str, object],
+) -> dict[str, object]:
+    comparison = {}
+    for journey_id, declaration in contract["journeys"].items():
+        actual = float(outcome["oracle"][journey_id]["reliability"])
+        assessment = compiled["estimates"][journey_id]
+        discovered = assessment.get("modelDiscoveredEstimate")
+        frozen = assessment.get("frozenModelEstimate")
+        manual_estimate = manual["estimates"].get(journey_id)
+        target = float(declaration["target"])
+        row = {
+            "heldOutReliability": actual,
+            "modelDiscoveredAssessmentStatus": assessment["assessmentStatus"],
+            "modelDiscoveredReason": assessment.get("reason"),
+            "manualDynamicAssessmentStatus": manual.get(
+                "assessmentStatus", "ASSESSED" if manual_estimate is not None else "UNASSESSABLE"
+            ),
+            "manualDynamicReasons": manual.get("reasons", []),
+        }
+        for name, value in (("modelDiscovered", discovered), ("manualDynamic", manual_estimate), ("frozen", frozen)):
+            row[f"{name}AbsoluteError"] = abs(value - actual) if value is not None else None
+            row[f"{name}TargetSideError"] = (value >= target) != (actual >= target) if value is not None else None
+        comparison[journey_id] = row
+    return comparison
 
 
 def run_condition(
@@ -981,22 +1034,7 @@ def run_condition(
     )
     validate_compiled_estimates(compiled, effective, contract)
 
-    comparison: dict[str, object] = {}
-    for journey_id in contract["journeys"]:
-        actual = float(outcome["oracle"][journey_id]["reliability"])
-        discovered = float(compiled["estimates"][journey_id]["modelDiscoveredEstimate"])
-        frozen = float(compiled["estimates"][journey_id]["frozenModelEstimate"])
-        manual_estimate = float(manual["estimates"][journey_id])
-        target = float(compiled["estimates"][journey_id]["target"])
-        comparison[journey_id] = {
-            "heldOutReliability": actual,
-            "modelDiscoveredAbsoluteError": abs(discovered - actual),
-            "manualDynamicAbsoluteError": abs(manual_estimate - actual),
-            "frozenAbsoluteError": abs(frozen - actual),
-            "modelDiscoveredTargetSideError": (discovered >= target) != (actual >= target),
-            "manualDynamicTargetSideError": (manual_estimate >= target) != (actual >= target),
-            "frozenTargetSideError": (frozen >= target) != (actual >= target),
-        }
+    comparison = compare_assessments(compiled, manual, outcome, contract)
 
     slis = local_slis(evidence_dir, evidence_load)
     validity = condition_validity(
@@ -1031,6 +1069,8 @@ def run_condition(
             "stateChanges": delta["stateChanges"],
             "operatorBindings": delta["bindings"],
             "runtimeParameters": delta["runtimeParameters"],
+            "reconciliationStatus": effective["reconciliationStatus"],
+            "assessmentStatus": compiled["status"],
             "effectiveModelVersion": effective["modelVersion"],
         },
         "localAvailabilitySlis": slis,
@@ -1090,6 +1130,7 @@ def run_pair(
         "seed": seed,
         "conditionOrder": order,
         "valid": valid,
+        "secondaryAnalysisStatus": "pending",
         "localSliBalance": balance,
         "conditions": results,
     }
@@ -1098,13 +1139,35 @@ def run_pair(
     return pair_result
 
 
+def result_checks(row: dict[str, object]) -> dict[str, object]:
+    """Read both revised results and immutable historical result packages."""
+    validity = row["validity"]
+    return {**validity["checks"], **validity.get("methodChecks", {})}
+
+
+def secondary_analysis_complete(pair: dict[str, object]) -> bool:
+    """Check execution completeness without requiring successful method outcomes."""
+    if "secondaryAnalysisStatus" in pair:
+        return pair["secondaryAnalysisStatus"] == "complete"
+    conditions = pair.get("conditions", {})
+    if set(conditions) != {"control", "treatment"}:
+        return False
+    # Historical inline-analysis records predate the explicit completion marker.
+    return all(
+        row.get("validity", {}).get("policy") != "measurement-and-intervention-only/v1"
+        and all(isinstance(row.get(field), dict) and bool(row[field])
+                for field in ("ablations", "negativeCases", "robustness"))
+        for row in conditions.values()
+    )
+
+
 def summarize(confirmatory: list[dict[str, object]], all_pairs: list[dict[str, object]]) -> dict[str, object]:
     valid_confirmatory = [pair for pair in confirmatory if pair["valid"]]
     treatments = [pair["conditions"]["treatment"] for pair in valid_confirmatory]
     controls = [pair["conditions"]["control"] for pair in valid_confirmatory]
     exact_treatment = sum(
-        row["validity"]["checks"].get("exactStateDeltaRecovery", False)
-        and row["validity"]["checks"].get("uniqueOperatorEdgeBindingRecovery", False)
+        result_checks(row).get("exactStateDeltaRecovery", False)
+        and result_checks(row).get("uniqueOperatorEdgeBindingRecovery", False)
         for row in treatments
     )
     false_control = sum(
@@ -1112,7 +1175,7 @@ def summarize(confirmatory: list[dict[str, object]], all_pairs: list[dict[str, o
         for row in controls
     )
     treatment_check_counts = {
-        name: sum(bool(row["validity"]["checks"].get(name, False)) for row in treatments)
+        name: sum(bool(result_checks(row).get(name, False)) for row in treatments)
         for name in (
             "metricsOnlyStateRecovery",
             "tracesOnlyEdgeRecovery",
@@ -1122,7 +1185,7 @@ def summarize(confirmatory: list[dict[str, object]], all_pairs: list[dict[str, o
         )
     }
     control_check_counts = {
-        name: sum(bool(row["validity"]["checks"].get(name, False)) for row in controls)
+        name: sum(bool(result_checks(row).get(name, False)) for row in controls)
         for name in (
             "metricsOnlyNoFalseStateDelta",
             "tracesOnlyNoFalseSuppression",
@@ -1159,7 +1222,13 @@ def summarize(confirmatory: list[dict[str, object]], all_pairs: list[dict[str, o
             },
         }
     return {
-        "schemaVersion": "emac.discovery-report/v4",
+        "schemaVersion": "emac.discovery-report/v5",
+        "eligibilityPolicy": (
+            "measurement-and-intervention-only/v1"
+            if all(row["validity"].get("policy") == "measurement-and-intervention-only/v1" for row in treatments + controls)
+            else "legacy-recorded-validity"
+        ),
+        "secondaryAnalysisIncompletePairs": sum(not secondary_analysis_complete(pair) for pair in valid_confirmatory),
         "attemptedPairs": len(all_pairs),
         "confirmatoryPairsRetained": len(valid_confirmatory),
         "invalidAttemptsRetained": len([pair for pair in all_pairs if not pair["valid"]]),
@@ -1179,12 +1248,12 @@ def summarize(confirmatory: list[dict[str, object]], all_pairs: list[dict[str, o
             "traceSampling": sampling_summary,
             "identityRedaction": {
                 "globalQPreserved": sum(
-                    bool(row["validity"]["checks"].get("identityRedactionPreservesGlobalQ"))
+                    bool(result_checks(row).get("identityRedactionPreservesGlobalQ"))
                     for row in treatments
                 ),
                 "bindingUnresolved": sum(
                     bool(
-                        row["validity"]["checks"].get(
+                        result_checks(row).get(
                             "identityRedactionLeavesBindingUnresolved"
                         )
                     )
@@ -1201,8 +1270,20 @@ def summarize(confirmatory: list[dict[str, object]], all_pairs: list[dict[str, o
                 ("frozen", "frozenAbsoluteError"),
             )
         },
+        "ownerHistoryAssessmentCoverage": {
+            name: {
+                "assessed": sum(row["comparison"]["owner-history"][key] is not None for row in treatments + controls),
+                "unassessable": sum(row["comparison"]["owner-history"][key] is None for row in treatments + controls),
+                "denominator": len(treatments) + len(controls),
+            }
+            for name, key in (
+                ("modelDiscovery", "modelDiscoveredAbsoluteError"),
+                ("manualDynamic", "manualDynamicAbsoluteError"),
+                ("frozen", "frozenAbsoluteError"),
+            )
+        },
         "frozenTargetSideErrorsInTreatments": sum(
-            row["comparison"]["owner-history"]["frozenTargetSideError"] for row in treatments
+            row["comparison"]["owner-history"]["frozenTargetSideError"] is True for row in treatments
         ),
     }
 
@@ -1216,9 +1297,11 @@ def write_markdown(path: Path, report: dict[str, object]) -> None:
         "# EmaC runtime-model discovery PoC",
         "",
         f"- Valid confirmatory pairs: {report['confirmatoryPairsRetained']}",
+        f"- Retained pairs with incomplete secondary analysis: {report['secondaryAnalysisIncompletePairs']}",
         f"- Exact treatment model recovery: {recovery['numerator']}/{recovery['denominator']}",
         f"- False discovery in controls: {false['numerator']}/{false['denominator']}",
         f"- Frozen target-side errors in treatments: {report['frozenTargetSideErrorsInTreatments']}",
+        f"- Owner-history assessment coverage: {json.dumps(report['ownerHistoryAssessmentCoverage'], sort_keys=True)}",
         (
             "- Metrics-only state recovery (edge unresolved): "
             f"{ablations['metricsOnlyStateRecovery']['numerator']}/"
@@ -1252,6 +1335,10 @@ def write_markdown(path: Path, report: dict[str, object]) -> None:
             f"{robustness['0.01']['treatments']['falseBindings']}"
         ),
     ]
+    if "complete" in report:
+        lines.insert(3, f"- Aggregate complete: {report['complete']}")
+        lines.append(f"- Missing primary pair records: {report['missingPrimaryPairIds']}")
+        lines.append(f"- Incomplete secondary analysis pair IDs: {report['incompleteSecondaryPairIds']}")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -1321,7 +1408,6 @@ def main() -> None:
         if args.defer_secondary:
             pair["primaryValid"] = pair["valid"]
             pair["secondaryAnalysisStatus"] = "pending"
-            pair["valid"] = False
             write_json(
                 output
                 / args.phase

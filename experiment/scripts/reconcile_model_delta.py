@@ -10,6 +10,7 @@ from pathlib import Path
 from artifact_integrity import (
     DELTA_APPLICATION_FIELDS,
     seal_artifact,
+    runtime_parameter_issues,
     validate_bootstrap_model,
     validate_candidate_delta,
     validate_reconciliation,
@@ -26,14 +27,22 @@ def reconcile(
     validate_bootstrap_model(base_model)
     validate_candidate_delta(candidate_delta, base_model)
     runtime = candidate_delta["runtimeParameters"]
-    not_permitted = int(runtime["notPermitted"])
+    not_permitted = int(runtime["notPermitted"]) if runtime else 0
     audits = candidate_delta["discoveryAudit"]["operatorEdgeBindings"]
     bindings = candidate_delta["bindings"]
 
     reasons: list[str] = []
     binding_decisions: list[dict[str, object]] = []
     status = "identified"
-    if not_permitted:
+    issues = runtime_parameter_issues(runtime) if runtime is not None else []
+    if candidate_delta["selectedOperator"] is None:
+        status = "unresolved"
+        matches = [row for row in candidate_delta["discoveryAudit"]["operatorSelection"] if row["withinTolerance"]]
+        reasons.append("multiple-count-consistent-operators" if matches else "no-count-consistent-operator")
+    elif issues:
+        status = "unresolved" if set(issues) <= {"empty-evidence-window", "no-operator-decisions"} else "contradictory"
+        reasons.extend(issues)
+    elif not_permitted:
         for audit in audits:
             matches = [
                 candidate

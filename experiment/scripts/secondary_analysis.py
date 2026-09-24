@@ -145,25 +145,24 @@ def secondary_checks(
     traces_only = ablations["tracesOnly"]
     full_fusion = ablations["fullFusion"]
     identity = robustness["identityRedaction"]
-    q = float(result["discovery"]["runtimeParameters"]["q"])
+    runtime = result["discovery"].get("runtimeParameters") or {}
+    q = runtime.get("q")
+    def same_parameter(value: object) -> bool:
+        return value is not None and q is not None and math.isclose(float(value), float(q), abs_tol=1e-12)
     checks = {
         "ablationSourcesAreSeparated": bool(ablations["sourceIsolation"]["verified"]),
         "metricsOnlyLeavesEdgeUnresolved": metrics_only["edgeBinding"]["status"]
         == "unresolved",
         "tracesOnlyLeavesOperatorUnresolved": traces_only["operator"]["status"]
         == "unresolved",
-        "fullFusionQMatchesPrimary": math.isclose(
-            float(full_fusion["q"]), q, abs_tol=1e-12
-        ),
+        "fullFusionQMatchesPrimary": same_parameter(full_fusion["q"]),
         "sampling10NeverFalseBinds": not robustness["traceSampling"]["0.1"][
             "discovery"
         ]["falseBinding"],
         "sampling1NeverFalseBinds": not robustness["traceSampling"]["0.01"][
             "discovery"
         ]["falseBinding"],
-        "identityRedactionPreservesGlobalQ": math.isclose(
-            float(identity["globalQ"]), q, abs_tol=1e-12
-        ),
+        "identityRedactionPreservesGlobalQ": same_parameter(identity["globalQ"]),
         "identityRedactionLeavesInstanceUnresolved": identity["specificInstance"]
         == "unresolved",
     }
@@ -243,8 +242,7 @@ def finalize(pair_dir: Path, phase: str, ordinal: int, allow_invalid: bool) -> N
         result["ablations"] = ablations
         result["negativeCases"] = negatives
         result["robustness"] = robustness
-        result["validity"]["checks"].update(checks)
-        result["validity"]["valid"] = all(result["validity"]["checks"].values())
+        result["validity"].setdefault("methodChecks", {}).update(checks)
         write_json(condition_dir / "result.json", result)
         write_json(condition_dir / "validity.json", result["validity"])
     pair["valid"] = pair["localSliBalance"]["valid"] and all(

@@ -10,6 +10,7 @@ from pathlib import Path
 from artifact_integrity import (
     evidence_references,
     seal_artifact,
+    runtime_parameters_from_counts,
     validate_adapter_catalog,
     validate_bootstrap_model,
     validate_contract,
@@ -66,8 +67,6 @@ def metric_observations(
                         "metricSource": source_id,
                     }
                 )
-    if not observations:
-        raise ValueError("no supported runtime operators discovered in metric snapshots")
     return observations
 
 
@@ -195,7 +194,7 @@ def aggregate_operator(
 
 def select_journey_operator(
     observations: list[dict[str, object]], eligible: int, tolerance_fraction: float
-) -> tuple[str, list[dict[str, object]]]:
+) -> tuple[str | None, list[dict[str, object]]]:
     names = sorted({str(row["operatorName"]) for row in observations})
     candidates = []
     tolerance = max(1, round(eligible * tolerance_fraction))
@@ -213,7 +212,7 @@ def select_journey_operator(
         )
     matches = [row for row in candidates if row["withinTolerance"]]
     if len(matches) != 1:
-        raise ValueError(f"journey operator is not uniquely identifiable: {candidates}")
+        return None, candidates
     return str(matches[0]["operatorName"]), candidates
 
 
@@ -321,12 +320,10 @@ def discover_delta(
     selected_operator, selection_audit = select_journey_operator(
         observations, eligible, tolerance_fraction
     )
-    counts = aggregate_operator(observations, selected_operator)
-    if not counts["decisions"] or not counts["permitted"]:
-        raise ValueError(f"undefined runtime parameters: {counts}")
-
-    bindings, binding_audit = infer_bindings(
-        base_model, graph, observations, selected_operator, tolerance_fraction
+    counts = aggregate_operator(observations, selected_operator) if selected_operator else None
+    bindings, binding_audit = (
+        infer_bindings(base_model, graph, observations, selected_operator, tolerance_fraction)
+        if selected_operator else ([], [])
     )
     base_by_key = {
         (row["adapterId"], row["operatorName"], row["serviceInstanceId"]): row
@@ -355,18 +352,9 @@ def discover_delta(
             }
         )
 
-    runtime_parameters = {
-        "eligible": eligible,
-        "decisions": counts["decisions"],
-        "permitted": counts["permitted"],
-        "permittedSuccessful": counts["permittedSuccessful"],
-        "notPermitted": counts["notPermitted"],
-        "A_P": counts["decisions"] / eligible,
-        "q": counts["permitted"] / counts["decisions"],
-        "A_V": counts["permittedSuccessful"] / counts["permitted"],
-    }
+    runtime_parameters = runtime_parameters_from_counts(eligible, counts) if counts is not None else None
     artifact = {
-        "schemaVersion": "emac.candidate-model-delta/v3",
+        "schemaVersion": "emac.candidate-model-delta/v4",
         "baseModelVersion": base_model["modelVersion"],
         "catalogVersion": catalog["catalogVersion"],
         "selectedOperator": selected_operator,

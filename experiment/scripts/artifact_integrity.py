@@ -74,7 +74,10 @@ def _require_list(value: object, label: str) -> list[object]:
 def _require_number(value: object, label: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise IntegrityError(f"{label} must be numeric")
-    return float(value)
+    number = float(value)
+    if not math.isfinite(number):
+        raise IntegrityError(f"{label} must be finite")
+    return number
 
 
 def _require_content_version(value: object, label: str) -> str:
@@ -209,7 +212,10 @@ def validate_binding_against_interactions(
 def validate_candidate_delta(
     delta: dict[str, object], base_model: dict[str, object] | None = None
 ) -> None:
-    verify_sealed_artifact(delta, "deltaVersion", "emac.candidate-model-delta/v3")
+    schema = delta.get("schemaVersion")
+    if schema not in {"emac.candidate-model-delta/v3", "emac.candidate-model-delta/v4"}:
+        raise IntegrityError("unsupported candidate delta schema")
+    verify_sealed_artifact(delta, "deltaVersion", schema)
     _require_content_version(delta.get("catalogVersion"), "catalogVersion")
     if base_model is not None:
         validate_bootstrap_model(base_model)
@@ -217,8 +223,22 @@ def validate_candidate_delta(
             raise IntegrityError("candidate delta targets a different bootstrap model")
         if delta.get("catalogVersion") != base_model.get("catalogVersion"):
             raise IntegrityError("candidate delta uses a different adapter catalog")
-    runtime = _require_mapping(delta.get("runtimeParameters"), "runtimeParameters")
-    _validate_runtime_parameters(runtime)
+    runtime = delta.get("runtimeParameters")
+    if delta.get("selectedOperator") is None:
+        if schema != "emac.candidate-model-delta/v4" or runtime is not None or delta.get("bindings"):
+            raise IntegrityError("unselected operator cannot supply runtime parameters or bindings")
+        matches = [row for row in delta["discoveryAudit"]["operatorSelection"] if row["withinTolerance"]]
+        if len(matches) == 1:
+            raise IntegrityError("unselected operator disagrees with unique selection audit")
+    else:
+        runtime = _require_mapping(runtime, "runtimeParameters")
+        selection = _require_list(delta["discoveryAudit"]["operatorSelection"], "operatorSelection")
+        matches = [row for row in selection if row["withinTolerance"]]
+        if len(matches) != 1 or matches[0]["operatorName"] != delta["selectedOperator"]:
+            raise IntegrityError("selected operator disagrees with unique selection audit")
+        # A candidate may document contradictory observations; only admitted
+        # effective models may expose them as probability parameters.
+        _validate_runtime_parameters(runtime, require_admissible=False)
     graph = _require_mapping(delta.get("observedTraceGraph"), "observedTraceGraph")
     interactions = _require_list(graph.get("interactions"), "observedTraceGraph.interactions")
     _interaction_index(interactions)
@@ -232,24 +252,51 @@ def validate_candidate_delta(
         raise IntegrityError("candidate delta requires hash-addressed evidenceRefs")
 
 
-def _validate_runtime_parameters(runtime: dict[str, object]) -> None:
+def runtime_parameters_from_counts(eligible: int, counts: dict[str, object]) -> dict[str, object]:
+    decisions = counts["decisions"]
+    permitted = counts["permitted"]
+    return {
+        "eligible": eligible,
+        **{key: counts[key] for key in ("decisions", "permitted", "permittedSuccessful", "notPermitted")},
+        "A_P": decisions / eligible if eligible > 0 else None,
+        "q": permitted / decisions if decisions > 0 else None,
+        "A_V": counts["permittedSuccessful"] / permitted if permitted > 0 else None,
+    }
+
+
+def runtime_parameter_issues(runtime: dict[str, object]) -> list[str]:
     eligible = _require_number(runtime.get("eligible"), "eligible")
     decisions = _require_number(runtime.get("decisions"), "decisions")
     permitted = _require_number(runtime.get("permitted"), "permitted")
     successful = _require_number(runtime.get("permittedSuccessful"), "permittedSuccessful")
     not_permitted = _require_number(runtime.get("notPermitted"), "notPermitted")
-    if eligible <= 0 or decisions <= 0 or permitted <= 0:
-        raise IntegrityError("runtime parameter denominators must be positive")
-    if not math.isclose(permitted + not_permitted, decisions, abs_tol=1e-9):
-        raise IntegrityError("permitted + notPermitted must equal decisions")
+    issues = []
+    if any(value < 0 or not value.is_integer() for value in (eligible, decisions, permitted, successful, not_permitted)):
+        issues.append("counts-must-be-nonnegative-integers")
+    if eligible == 0:
+        issues.append("empty-evidence-window")
+    if decisions == 0:
+        issues.append("no-operator-decisions")
+    if decisions > eligible:
+        issues.append("decisions-exceed-eligible-requests")
+    if permitted + not_permitted != decisions:
+        issues.append("decision-counts-do-not-partition")
     if not 0 <= successful <= permitted:
-        raise IntegrityError("permittedSuccessful must be within permitted calls")
-    expected = {
-        "A_P": decisions / eligible,
-        "q": permitted / decisions,
-        "A_V": successful / permitted,
-    }
-    for field, value in expected.items():
+        issues.append("successful-count-outside-permitted-calls")
+    return issues
+
+
+def _validate_runtime_parameters(runtime: dict[str, object], *, require_admissible: bool = True) -> None:
+    issues = runtime_parameter_issues(runtime)
+    if require_admissible and issues:
+        raise IntegrityError(f"runtime assessment preconditions failed: {issues}")
+    expected = runtime_parameters_from_counts(runtime["eligible"], runtime)
+    for field in ("A_P", "q", "A_V"):
+        value = expected[field]
+        if value is None:
+            if runtime.get(field) is not None:
+                raise IntegrityError(f"undefined conditional parameter {field} must be null")
+            continue
         observed = _require_number(runtime.get(field), field)
         if not math.isclose(observed, value, rel_tol=0.0, abs_tol=1e-12):
             raise IntegrityError(f"runtime parameter {field} is inconsistent with counts")
@@ -280,6 +327,9 @@ def validate_reconciliation(
     if reconciliation["status"] == "identified":
         if admitted != list(DELTA_APPLICATION_FIELDS) or rejected:
             raise IntegrityError("identified reconciliation must admit the complete delta")
+        if candidate_delta["selectedOperator"] is None:
+            raise IntegrityError("identified reconciliation requires an identified operator")
+        _validate_runtime_parameters(candidate_delta["runtimeParameters"])
     elif admitted or rejected != list(DELTA_APPLICATION_FIELDS):
         raise IntegrityError("unresolved reconciliation must reject the complete delta")
 
@@ -299,10 +349,13 @@ def validate_effective_model(model: dict[str, object]) -> None:
         runtime = _require_mapping(model.get("runtimeReliability"), "runtimeReliability")
         _validate_runtime_parameters(runtime)
         interactions = _require_list(model.get("interactions"), "interactions")
+        baseline = _require_list(model.get("baselineInteractions", interactions), "baselineInteractions")
         for raw_binding in _require_list(model.get("operatorBindings"), "operatorBindings"):
             validate_binding_against_interactions(
-                _require_mapping(raw_binding, "binding"), interactions
+                _require_mapping(raw_binding, "binding"), baseline
             )
+            if any(edge["edgeId"] == raw_binding["affectedEdge"]["edgeId"] for edge in interactions):
+                validate_binding_against_interactions(raw_binding, interactions)
     else:
         if model.get("appliedDeltaVersion") is not None:
             raise IntegrityError("an unresolved model cannot report an applied delta")

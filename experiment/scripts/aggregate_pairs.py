@@ -7,7 +7,7 @@ import argparse
 import json
 from pathlib import Path
 
-from run_experiment import summarize, write_json, write_markdown
+from run_experiment import secondary_analysis_complete, summarize, write_json, write_markdown
 
 
 def load_pairs(root: Path) -> list[dict[str, object]]:
@@ -29,7 +29,19 @@ def aggregate(pairs: list[dict[str, object]], required: int) -> dict[str, object
     report["unusedValidReplacementAttempts"] = max(0, len(valid) - required)
     report["retainedPairIds"] = [pair["pairId"] for pair in retained]
     report["allAttemptedPairIds"] = [pair["pairId"] for pair in pairs]
-    report["complete"] = len(retained) == required
+    present = set(report["allAttemptedPairIds"])
+    report["missingPrimaryPairIds"] = [
+        f"confirmatory-pair-{ordinal:02d}" for ordinal in range(1, required + 1)
+        if f"confirmatory-pair-{ordinal:02d}" not in present
+    ]
+    report["incompleteSecondaryPairIds"] = [
+        pair["pairId"] for pair in retained if not secondary_analysis_complete(pair)
+    ]
+    report["complete"] = (
+        len(retained) == required
+        and not report["missingPrimaryPairIds"]
+        and not report["incompleteSecondaryPairIds"]
+    )
     return report
 
 
@@ -47,8 +59,9 @@ def main() -> None:
     write_markdown(args.output / "report.md", report)
     if not report["complete"]:
         raise SystemExit(
-            f"only {report['validAttemptsAvailable']} valid paired blocks are available; "
-            f"{args.required} required"
+            f"aggregate incomplete: {report['validAttemptsAvailable']} measurement-valid paired blocks; "
+            f"{args.required} required; missing primary records: {report['missingPrimaryPairIds']}; "
+            f"incomplete secondary analysis: {report['incompleteSecondaryPairIds']}"
         )
 
 

@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "emac.discovery-protocol/v5",
+  "schemaVersion": "emac.discovery-protocol/v6",
   "claimClass": "operator-edge-model-discovery-feasibility",
   "upstreamCommit": "a6619308ef610c0002ce03eedbaf6672a4fc5cae",
   "runtimeIsolation": {
@@ -14,7 +14,7 @@
     "pairJobMaxParallel": 20,
     "sharedImagePolicy": "Build once from the pinned source commit, publish with the experiment commit SHA, and pull the identical image set in every paired-block job.",
     "conditionOrder": "seeded random permutation within each pair",
-    "invalidReplacementPolicy": "After all 20 primary pairs finish, run at most two replacement pairs for missing or invalid pairs; retain every attempt in artifacts; never filter individual condition-runs."
+    "invalidReplacementPolicy": "Retain every attempt. Replace up to two completed pairs that fail independently defined measurement/intervention checks. Wrong, unresolved, or failed discovery remains a scored outcome. A missing primary result keeps aggregation incomplete and is not automatically replaced."
   },
   "identity": {
     "policy": "Generate opaque gateway instance identifiers and randomly choose the 1% minority slot for every pair.",
@@ -95,16 +95,8 @@
       "negative binding cases",
       "telemetry robustness",
       "final validity and aggregation"
-    ]
-  },
-  "validity": {
-    "required": [
-      "Both gateway processes restart before bootstrap discovery in each condition.",
-      "Bootstrap model v0 is frozen before hidden preconditioning.",
-      "Both gateways restart again after bootstrap so discovery traffic cannot seed the breaker sliding window.",
-      "The treatment breaker is OPEN and the control breaker is CLOSED after preconditioning.",
-      "Visits is healthy after the preconditioning fault is disabled.",
-      "The condition completes before waitDurationInOpenState elapses.",
+    ],
+    "methodOutcomes": [
       "Opaque instance identifiers are recovered from telemetry rather than logical Compose slots.",
       "The treatment operator-to-edge binding is unique within the predeclared tolerance.",
       "Every contract, model, delta, reconciliation, and compilation content hash is recomputed and verified before use.",
@@ -116,9 +108,32 @@
       "The contradiction replay produces a versioned contradictory decision and an UNASSESSABLE compilation through the production pipeline.",
       "Sampled-trace replays never emit an incorrect binding; insufficient sampled evidence is reported as unresolved.",
       "Identity-redacted evidence preserves global q but does not fabricate an instance-scoped binding.",
+      "Retain wrong bindings, unresolved operator selection and UNASSESSABLE outputs in the independently eligible denominator.",
+      "Report numeric assessment errors together with assessed and unassessable counts; do not assign zero error to an abstention."
+    ]
+  },
+  "validity": {
+    "required": [
+      "Both gateway processes restart before bootstrap discovery in each condition.",
+      "Bootstrap model v0 is frozen before hidden preconditioning.",
+      "Both gateways restart again after bootstrap so discovery traffic cannot seed the breaker sliding window.",
+      "The treatment breaker is OPEN and the control breaker is CLOSED after preconditioning.",
+      "Visits is healthy after the preconditioning fault is disabled.",
+      "The condition completes before waitDurationInOpenState elapses.",
       "The model and estimate freeze predates all held-out outcome requests.",
       "Every admitted evidence trace carries the exact measurement-window run ID; rejected run-ID traces are counted.",
-      "Boundary values use direct actuator snapshots and exact counter subtraction."
-    ]
-  }
+      "Boundary values use direct actuator snapshots and exact counter subtraction.",
+      "Raw evaluator counters match the requested evidence load, independently of the operator selected by discovery.",
+      "Raw trace coverage meets the predeclared threshold on both opaque instances; paired local availability meets the predeclared tolerance."
+    ],
+    "policy": "measurement-and-intervention-only/v1"
+  },
+  "implementationChecks": [
+    "Require nonnegative integer counts with 0 <= S <= P <= D <= N, N > 0, D > 0 and P + rejected = D before admitting a numeric estimate.",
+    "All-rejected windows use [S + (D-S) A_F] / N after binding identification; conditional A_V remains null.",
+    "Multiple or absent count-consistent operator names produce versioned unresolved models.",
+    "Integrity violations remain errors; versioned epistemic refusals remain completed method outcomes.",
+    "Missing, ambiguous or wrong-role runtime traces make the manual baseline UNASSESSABLE without aborting freeze or outcome evaluation.",
+    "Aggregate completion requires all retained secondary analyses to finish; pending or missing analyses are not successful completion, while completed method failures stay in the denominator without replacements."
+  ]
 }

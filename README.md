@@ -26,3 +26,11 @@ artifact boundaries, validity policy, and exact claim.
 
 The latest retained confirmatory outcome and the digest manifest for all 20 raw
 pair artifacts are in [`results/fcb822c`](results/fcb822c/README.md).
+
+The correctness update separates measurement validity from discovery
+outcomes, returns versioned unassessable results for operator ambiguity, and
+enforces the probability domain, including all-rejected windows. An unassessable
+manual baseline is retained without aborting outcome evaluation. Aggregation
+requires completed secondary analyses, independently of whether the method
+passes those checks. These changes have regression coverage. The committed 20-pair result remains attributed
+to its original experiment commit; this revision adds no live experiment.

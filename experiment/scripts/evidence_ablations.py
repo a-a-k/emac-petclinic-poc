@@ -8,6 +8,7 @@ import hashlib
 import json
 from pathlib import Path
 
+from artifact_integrity import runtime_parameters_from_counts
 from discover_model import (
     aggregate_operator,
     load_adapters,
@@ -38,7 +39,7 @@ def metrics_only(
     selected, selection_audit = select_journey_operator(
         observations, eligible, tolerance_fraction
     )
-    counts = aggregate_operator(observations, selected)
+    counts = aggregate_operator(observations, selected) if selected is not None else None
     base_by_key = {
         (row["adapterId"], row["operatorName"], row["serviceInstanceId"]): row
         for row in base_operator_model["operators"]
@@ -63,13 +64,7 @@ def metrics_only(
         {
             "selectedOperator": selected,
             "stateChanges": state_changes,
-            "runtimeParameters": {
-                "eligible": eligible,
-                "decisions": counts["decisions"],
-                "permitted": counts["permitted"],
-                "notPermitted": counts["notPermitted"],
-                "q": counts["permitted"] / counts["decisions"],
-            },
+            "runtimeParameters": runtime_parameters_from_counts(eligible, counts) if counts is not None else None,
             "edgeBinding": {
                 "status": "unresolved",
                 "reason": "trace evidence withheld by ablation",
@@ -188,7 +183,7 @@ def evaluate(
     )
     full_result = {
         "status": (
-            "typed-delta"
+            "unresolved" if full_delta["selectedOperator"] is None else "typed-delta"
             if full_delta["stateChanges"] and full_delta["bindings"]
             else "no-drift"
             if not full_delta["stateChanges"] and not full_delta["bindings"]
@@ -197,7 +192,7 @@ def evaluate(
         "selectedOperator": full_delta["selectedOperator"],
         "stateChanges": full_delta["stateChanges"],
         "bindings": full_delta["bindings"],
-        "q": full_delta["runtimeParameters"]["q"],
+        "q": (full_delta["runtimeParameters"] or {}).get("q"),
         "inputPolicy": {
             "metricSnapshotsRead": True,
             "traceGraphRead": True,

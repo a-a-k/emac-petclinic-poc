@@ -67,7 +67,7 @@ def compile_estimates(
     runtime = effective_model["runtimeReliability"]
     a_prefix = float(runtime["A_P"])
     q = float(runtime["q"])
-    a_visits = float(runtime["A_V"])
+    a_visits = float(runtime["A_V"]) if runtime["A_V"] is not None else None
 
     all_assessed = True
     for journey_id, declaration in contract["journeys"].items():
@@ -78,7 +78,14 @@ def compile_estimates(
             for binding in effective_model.get("operatorBindings", [])
             if binding_matches_role(binding, role)
         ]
-        if q < 1.0 and len(matching_bindings) != 1:
+        bindings = effective_model.get("operatorBindings", [])
+        role_bound = (
+            bool(matching_bindings)
+            and len(matching_bindings) == len(bindings)
+            and len({row["affectedEdge"]["edgeId"] for row in matching_bindings}) == 1
+            and len({row["serviceInstanceId"] for row in matching_bindings}) == len(matching_bindings)
+        )
+        if q < 1.0 and not role_bound:
             all_assessed = False
             estimates[journey_id] = {
                 "assessmentStatus": "UNASSESSABLE",
@@ -89,10 +96,16 @@ def compile_estimates(
             }
             continue
         a_fallback = 1.0 if declaration["fallbackSatisfiesJourney"] else 0.0
-        discovered = a_prefix * (
-            q * a_visits + (1.0 - q * a_visits) * a_fallback
+        # This count form also handles a completely rejected window without
+        # inventing a conditional success probability for zero permitted calls.
+        discovered = (
+            runtime["permittedSuccessful"]
+            + (runtime["decisions"] - runtime["permittedSuccessful"]) * a_fallback
+        ) / runtime["eligible"]
+        frozen = (
+            a_prefix * (a_visits + (1.0 - a_visits) * a_fallback)
+            if a_visits is not None else a_prefix if a_fallback == 1.0 else None
         )
-        frozen = a_prefix * (a_visits + (1.0 - a_visits) * a_fallback)
         target = float(declaration["target"])
         estimates[journey_id] = {
             "assessmentStatus": "ASSESSED",
@@ -105,7 +118,7 @@ def compile_estimates(
             "modelDiscoveredEstimate": discovered,
             "frozenModelEstimate": frozen,
             "modelDiscoveredTargetSide": target_side(discovered, target),
-            "frozenModelTargetSide": target_side(frozen, target),
+            "frozenModelTargetSide": target_side(frozen, target) if frozen is not None else None,
         }
 
     artifact = {

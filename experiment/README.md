@@ -86,9 +86,15 @@ missing runtime edge executions ~= not-permitted calls
 
 within the predeclared one-percent tolerance. The discovered edge must also
 uniquely satisfy the semantic operation predicate required by the journey.
+Identification is conditional on the adapter's once-per-request execution
+semantics, aligned windows, and the available bootstrap interactions. A unique
+count match does not rule out an unmodelled explanation for an absent call.
 Ambiguous evidence produces a versioned `unresolved` decision; conflicting
 evidence produces `contradictory`. Neither delta is applied and compilation
 returns `UNASSESSABLE` rather than raising an exception or selecting a candidate.
+Zero or multiple count-consistent operator names also produce `unresolved`.
+The candidate retains its selection audit with null `selectedOperator` and
+`runtimeParameters`; artifact-integrity violations remain errors.
 
 For example, if bootstrap contains 100/100 Customers and 100/100 Visits edge
 executions on an instance, while treatment evidence contains 60/60 Customers,
@@ -150,6 +156,54 @@ R_J = A_P [q A_V + (1 - q A_V) A_F]
 `owner-history` declares `A_F=0`; `owner-only` declares `A_F=1`. The held-out
 oracle separately checks owner `6` and visit `1` after the estimate has frozen.
 
+With `D=sum(decisions)` and `S=sum(permittedSuccessful)`, this expression equals
+`[S + (D-S) A_F] / N`. The implementation requires nonnegative integer counts,
+`0 <= S <= P <= D <= N`, `N>0`, `D>0`, and `P + rejected = D`. Selection
+tolerance does not relax these probability-domain constraints. Inconsistent
+counts yield a contradictory model and no numeric journey estimate.
+
+The count form supports `P=0` when the required binding is identified. `A_V`
+remains null: the conditional success rate of permitted calls is unobserved.
+The frozen-suppression baseline also remains null for a required branch in
+that case. A fully suppressed edge retains its declared role through the
+bootstrap interaction record. The manual baseline uses its explicitly supplied
+mapping when no permitted call remains in current traces.
+
+## Measurement validity and method outcomes
+
+The correctness update separates `validity.checks` from
+`validity.methodChecks`. Eligibility checks use the evaluator's known
+intervention, raw counters and trace records after model freeze. Wrong or
+unresolved bindings, false deltas, unsuccessful negative replays and sampling
+errors are method outcomes. Secondary analysis never changes measurement
+validity. An unassessable result is retained with null numeric-error fields,
+and reports include assessed and unassessable denominators.
+
+Missing, ambiguous, or wrong-role runtime trace evidence for the manual baseline
+produces its own `UNASSESSABLE` record with null estimates and explicit reasons;
+the model freeze and held-out evaluation still proceed. Malformed declarations
+and artifact-integrity failures remain errors.
+
+Only completed, independently invalid measurement pairs can schedule bounded
+replacements. A missing primary result leaves aggregation incomplete; it is
+not silently classified as a measurement failure. All attempted pair records
+and the independently eligible subset remain visible in the report.
+
+Measurement validity does not imply analysis completion. A retained pair with
+pending, failed, or missing secondary-analysis status keeps the aggregate
+incomplete and makes the aggregation command fail after writing its reports.
+It stays in the outcome denominator and does not trigger a replacement.
+Completed secondary checks that report method failures are still complete.
+Historical inline-analysis records without a status marker require populated
+ablation, negative-case, and robustness reports in both conditions.
+
+The committed `results/fcb822c` archive remains the original experiment: its
+summary reports 20 attempted, 20 retained pairs, and zero replacements. That
+run's validity gate included recovery and secondary-analysis checks. This
+revision changes code and regression tests; it does not claim a new live run or
+alter the archived measurements. Historical result packages retain their legacy
+eligibility label when read by the revised summarizer.
+
 ## Randomization and anti-hardcoding
 
 Each pair generates two opaque instance identifiers and randomly selects which
@@ -179,8 +233,9 @@ the exact window ID and reports rejected adjacent-window traces.
 
 The default workflow dispatch runs only the pilot. Twenty confirmatory pairs are
 enabled by an explicit boolean dispatch input and start only after that dispatch's
-pilot succeeds. Invalid confirmatory pairs are retained and replaced as whole
-pairs, up to two replacements.
+pilot succeeds. Independently invalid measurement pairs are retained and
+replaced as whole pairs, up to two replacements. Discovery failures remain
+scored outcomes and do not trigger replacements.
 
 ## Evidence and artifacts
 

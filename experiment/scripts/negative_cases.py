@@ -188,6 +188,20 @@ def evaluate(
     primary_candidate = discover_delta(
         base_model_path, evidence_dir, adapters_path, tolerance_fraction
     )
+    primary_decision = reconcile(read_json(base_model_path), primary_candidate)
+    if primary_decision["status"] != "identified":
+        unavailable = {
+            "status": "not-evaluable",
+            "reason": "primary-model-not-identified",
+            "reconciliationStatus": primary_decision["status"],
+        }
+        return seal_artifact({
+            "schemaVersion": "emac.negative-binding-cases/v2",
+            "baseModelVersion": read_json(base_model_path)["modelVersion"],
+            "primaryCandidateDeltaVersion": primary_candidate["deltaVersion"],
+            "ambiguityReplay": unavailable,
+            "contradictionReplay": unavailable,
+        }, "reportVersion")
     ambiguity = _production_replay(
         "ambiguity",
         _ambiguity_mutation,

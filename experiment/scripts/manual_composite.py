@@ -7,7 +7,12 @@ import argparse
 import json
 from pathlib import Path
 
-from artifact_integrity import binding_matches_role, validate_contract
+from artifact_integrity import (
+    binding_matches_role,
+    runtime_parameter_issues,
+    runtime_parameters_from_counts,
+    validate_contract,
+)
 from discover_model import (
     aggregate_operator,
     load_adapters,
@@ -35,41 +40,59 @@ def evaluate(
         raise ValueError(f"manual model references unknown interaction role {role_id!r}")
     if manual_model.get("fallback") != role.get("fallbackId"):
         raise ValueError("manual fallback does not match the declared interaction role")
+    if any(
+        declaration["suppressedInteractionRole"] != role_id
+        for declaration in contract["journeys"].values()
+    ):
+        raise ValueError("manual composite cannot evaluate journeys with a different role")
     primary = manual_model["primaryEdge"]
+    counts = aggregate_operator(observations, operator)
+    eligible = int(read_json(evidence_dir / "load-summary.json")["completed"])
+    runtime = runtime_parameters_from_counts(eligible, counts)
+
+    def unassessable(reasons: list[str]) -> dict[str, object]:
+        return {
+            "schemaVersion": "emac.manual-dynamic-composite/v1",
+            "assessmentStatus": "UNASSESSABLE",
+            "manualMapping": manual_model,
+            "reasons": reasons,
+            "runtimeParameters": runtime,
+            "estimates": {journey_id: None for journey_id in contract["journeys"]},
+        }
+
+    issues = runtime_parameter_issues(runtime)
+    if issues:
+        return unassessable(issues)
     matching_edges = [
         edge
         for edge in trace_graph(evidence_dir)["interactions"]
         if edge["sourceService"] == primary["sourceService"]
         and edge["targetService"] == primary["targetService"]
     ]
-    if len(matching_edges) != 1:
-        raise ValueError("manual primary edge is not uniquely present in runtime traces")
-    manual_binding = {"affectedEdge": matching_edges[0]}
-    if not binding_matches_role(manual_binding, role):
-        raise ValueError("manual primary edge does not satisfy its declared semantic role")
-    if any(
-        declaration["suppressedInteractionRole"] != role_id
-        for declaration in contract["journeys"].values()
-    ):
-        raise ValueError("manual composite cannot evaluate journeys with a different role")
-    counts = aggregate_operator(observations, operator)
-    eligible = int(read_json(evidence_dir / "load-summary.json")["completed"])
-    if not eligible or not counts["decisions"] or not counts["permitted"]:
-        raise ValueError("manual composite has an undefined denominator")
-    a_prefix = counts["decisions"] / eligible
-    q = counts["permitted"] / counts["decisions"]
-    a_visits = counts["permittedSuccessful"] / counts["permitted"]
+    if len(matching_edges) > 1:
+        return unassessable(["manual-primary-edge-ambiguous-in-traces"])
+    if not matching_edges and counts["permitted"] > 0:
+        return unassessable(["manual-primary-edge-absent-despite-permitted-calls"])
+    manual_binding = {"affectedEdge": matching_edges[0]} if matching_edges else None
+    if manual_binding is not None and not binding_matches_role(manual_binding, role):
+        return unassessable(["manual-primary-edge-does-not-satisfy-declared-role"])
     estimates = {}
     for journey_id, declaration in contract["journeys"].items():
         a_fallback = 1.0 if declaration["fallbackSatisfiesJourney"] else 0.0
-        estimates[journey_id] = a_prefix * (
-            q * a_visits + (1.0 - q * a_visits) * a_fallback
-        )
+        estimates[journey_id] = (
+            counts["permittedSuccessful"]
+            + (counts["decisions"] - counts["permittedSuccessful"]) * a_fallback
+        ) / eligible
     return {
         "schemaVersion": "emac.manual-dynamic-composite/v1",
+        "assessmentStatus": "ASSESSED",
         "manualMapping": manual_model,
-        "semanticBinding": {"role": role_id, "affectedEdge": matching_edges[0]},
-        "runtimeParameters": {"A_P": a_prefix, "q": q, "A_V": a_visits},
+        "semanticBinding": {
+            "role": role_id,
+            "affectedEdge": matching_edges[0] if matching_edges else primary,
+            "source": "runtime-traces" if matching_edges else "declared-manual-mapping",
+        },
+        "runtimeParameters": runtime,
         "estimates": estimates,
     }
 

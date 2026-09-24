@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://emac.example/schemas/candidate-model-delta.schema.json",
-  "title": "EmaC candidate model delta v3",
+  "title": "EmaC candidate model delta v4 (including unresolved operator selection)",
   "type": "object",
   "required": [
     "schemaVersion",
@@ -18,13 +18,14 @@
     "evidenceRefs"
   ],
   "properties": {
-    "schemaVersion": {"const": "emac.candidate-model-delta/v3"},
+    "schemaVersion": {"const": "emac.candidate-model-delta/v4"},
     "deltaVersion": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "baseModelVersion": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "catalogVersion": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "selectedOperator": {"type": ["string", "null"]},
     "stateChanges": {"type": "array"},
     "bindings": {"type": "array"},
-    "runtimeParameters": {"type": "object"},
+    "runtimeParameters": {"type": ["object", "null"]},
     "observedOperators": {"type": "array"},
     "observedTraceGraph": {"type": "object"},
     "discoveryAudit": {"type": "object"},
